@@ -1,12 +1,25 @@
-use soroban_sdk::{Env, Symbol};
+use soroban_sdk::Env;
+use syn::{parse_str, File, Item, Type, Fields, Meta};
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+pub struct SizeWarning {
+    pub struct_name: String,
+    pub estimated_size: usize,
+    pub limit: usize,
+}
 
 pub struct Analyzer {
     pub strict_mode: bool,
+    pub ledger_limit: usize,
 }
 
 impl Analyzer {
     pub fn new(strict_mode: bool) -> Self {
-        Self { strict_mode }
+        Self { 
+            strict_mode,
+            ledger_limit: 64000, // Default 64KB warning threshold
+        }
     }
 
     pub fn scan_auth_gaps(&self, _code: &str) -> Vec<String> {
@@ -17,6 +30,78 @@ impl Analyzer {
     pub fn check_storage_collisions(&self, keys: Vec<String>) -> bool {
         // Placeholder for collision detection
         false
+    }
+
+    pub fn analyze_ledger_size(&self, source: &str) -> Vec<SizeWarning> {
+        let file = match parse_str::<File>(source) {
+            Ok(f) => f,
+            Err(_) => return vec![],
+        };
+        
+        let mut warnings = Vec::new();
+
+        for item in file.items {
+            if let Item::Struct(s) = item {
+                let has_contracttype = s.attrs.iter().any(|attr| {
+                    match &attr.meta {
+                        Meta::Path(path) => path.is_ident("contracttype"),
+                        _ => false,
+                    }
+                });
+
+                if has_contracttype {
+                    let size = self.estimate_struct_size(&s);
+                    if size > self.ledger_limit || (self.strict_mode && size > self.ledger_limit / 2) {
+                        warnings.push(SizeWarning {
+                            struct_name: s.ident.to_string(),
+                            estimated_size: size,
+                            limit: self.ledger_limit,
+                        });
+                    }
+                }
+            }
+        }
+        warnings
+    }
+
+    fn estimate_struct_size(&self, s: &syn::ItemStruct) -> usize {
+        let mut total_size = 0;
+        match &s.fields {
+            Fields::Named(fields) => {
+                for field in &fields.named {
+                    total_size += self.estimate_type_size(&field.ty);
+                }
+            }
+            Fields::Unnamed(fields) => {
+                for field in &fields.unnamed {
+                    total_size += self.estimate_type_size(&field.ty);
+                }
+            }
+            Fields::Unit => {}
+        }
+        total_size
+    }
+
+    fn estimate_type_size(&self, ty: &Type) -> usize {
+        match ty {
+            Type::Path(tp) => {
+                if let Some(segment) = tp.path.segments.last() {
+                    let ident = segment.ident.to_string();
+                    match ident.as_str() {
+                        "u32" | "i32" | "bool" => 4,
+                        "u64" | "i64" => 8,
+                        "u128" | "i128" | "I128" | "U128" => 16,
+                        "Address" => 32,
+                        "Bytes" | "BytesN" | "String" | "Symbol" => 64,
+                        "Vec" | "Map" => 128,
+                        _ => 32,
+                    }
+                } else {
+                    8
+                }
+            }
+            _ => 8,
+        }
     }
 }
 

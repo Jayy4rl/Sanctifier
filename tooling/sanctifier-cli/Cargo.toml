@@ -11,6 +11,8 @@ anyhow = "1.0"
 sanctifier-core = { path = "../sanctifier-core" }
 tokio = { version = "1.0", features = ["full"] }
 colored = "2.0"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [[bin]]
 name = "sanctifier"

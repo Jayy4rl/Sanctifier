@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use colored::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::fs;
+use sanctifier_core::Analyzer;
 
 #[derive(Parser)]
 #[command(name = "sanctifier")]
@@ -21,6 +23,10 @@ enum Commands {
         /// Output format (text, json)
         #[arg(short, long, default_value = "text")]
         format: String,
+
+        /// Limit for ledger entry size in bytes
+        #[arg(short, long, default_value = "64000")]
+        limit: usize,
     },
     /// Generate a security report
     Report {
@@ -36,14 +42,44 @@ fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Analyze { path, format } => {
+        Commands::Analyze { path, format, limit } => {
             println!("{} Analyzing contract at {:?}...", "🔍".blue(), path);
-            // Simulate analysis
+            
+            let mut analyzer = Analyzer::new(false);
+            analyzer.ledger_limit = *limit;
+            
+            let mut all_warnings = Vec::new();
+
+            if path.is_dir() {
+                analyze_directory(path, &analyzer, &mut all_warnings);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                if let Ok(content) = fs::read_to_string(path) {
+                    all_warnings.extend(analyzer.analyze_ledger_size(&content));
+                }
+            }
+
             println!("{} Static analysis complete.", "✅".green());
+            
             if format == "json" {
-                println!("{{ \"status\": \"secure\", \"issues\": [] }}");
+                let json = serde_json::to_string_pretty(&all_warnings).unwrap_or_else(|_| "[]".to_string());
+                println!("{}", json);
             } else {
-                println!("No critical issues found.");
+                if all_warnings.is_empty() {
+                    println!("No ledger size issues found.");
+                } else {
+                    for warning in all_warnings {
+                        println!(
+                            "{} Warning: Struct {} is approaching ledger entry size limit!",
+                            "⚠️".yellow(),
+                            warning.struct_name.bold()
+                        );
+                        println!(
+                            "   Estimated size: {} bytes (Limit: {} bytes)",
+                            warning.estimated_size.to_string().red(),
+                            warning.limit
+                        );
+                    }
+                }
             }
         },
         Commands::Report { output } => {
@@ -57,6 +93,25 @@ fn main() {
         Commands::Init => {
             println!("{} Initializing Sanctifier configuration...", "⚙️".cyan());
             println!("Created .sanctify.toml");
+        }
+    }
+}
+
+fn analyze_directory(dir: &Path, analyzer: &Analyzer, all_warnings: &mut Vec<sanctifier_core::SizeWarning>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                analyze_directory(&path, analyzer, all_warnings);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let warnings = analyzer.analyze_ledger_size(&content);
+                    for mut w in warnings {
+                        w.struct_name = format!("{}: {}", path.display(), w.struct_name);
+                        all_warnings.push(w);
+                    }
+                }
+            }
         }
     }
 }
