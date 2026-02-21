@@ -1,5 +1,6 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 use soroban_sdk::Env;
 use syn::{parse_str, File, Item, Type, Fields, Meta, ExprMethodCall, Macro};
 use syn::visit::{self, Visit};
@@ -1584,3 +1585,6 @@ fn is_string_literal(expr: &syn::Expr) -> bool {
      }
  }
 >>>>>>> 1c80bbf (feat: Support for Custom Linter Rules)
+=======
+
+>>>>>>> a9bd22f (feat:Setup GitHub Actions)

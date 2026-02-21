@@ -23,7 +23,7 @@ impl VulnerableContract {
             .instance()
             .get(&symbol_short!("admin"))
             .expect("Admin not set");
-        // env.require_auth(&admin); // Assume we can verify this if it were an Address
+        // env.require_auth(&admin);
         env.storage()
             .instance()
             .set(&symbol_short!("admin"), &new_admin);
