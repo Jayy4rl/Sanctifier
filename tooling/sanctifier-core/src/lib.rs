@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 use soroban_sdk::Env;
 use syn::{parse_str, File, Item, Type, Fields, Meta};
 use syn::visit::{self, Visit};
@@ -7,6 +8,15 @@ use thiserror::Error;
 use std::collections::HashSet;
 use std::panic::{self, AssertUnwindSafe};
 use regex::Regex;
+=======
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use syn::spanned::Spanned;
+use syn::visit::{self, Visit};
+use syn::{parse_str, Fields, File, Item, Meta, Type};
+
+use soroban_sdk::Env;
+>>>>>>> 6856cf4 (closes 47)
 
 pub mod gas_estimator;
 pub mod gas_report;
@@ -97,6 +107,84 @@ pub struct UnsafePattern {
     pub snippet: String,
 }
 
+<<<<<<< HEAD
+=======
+// ── Upgrade analysis types ────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UpgradeFinding {
+    pub category: UpgradeCategory,
+    pub function_name: Option<String>,
+    pub location: String,
+    pub message: String,
+    pub suggestion: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum UpgradeCategory {
+    AdminControl,
+    Timelock,
+    InitPattern,
+    StorageLayout,
+    Governance,
+}
+
+/// Upgrade safety report.
+#[derive(Debug, Serialize, Clone)]
+pub struct UpgradeReport {
+    pub findings: Vec<UpgradeFinding>,
+    pub upgrade_mechanisms: Vec<String>,
+    pub init_functions: Vec<String>,
+    pub storage_types: Vec<String>,
+    pub suggestions: Vec<String>,
+}
+
+impl UpgradeReport {
+    pub fn empty() -> Self {
+        Self {
+            findings: vec![],
+            upgrade_mechanisms: vec![],
+            init_functions: vec![],
+            storage_types: vec![],
+            suggestions: vec![],
+        }
+    }
+}
+
+fn has_attr(attrs: &[syn::Attribute], name: &str) -> bool {
+    attrs.iter().any(|attr| {
+        if let Meta::Path(path) = &attr.meta {
+            path.is_ident(name) || path.segments.iter().any(|s| s.ident == name)
+        } else {
+            false
+        }
+    })
+}
+
+fn is_upgrade_or_admin_fn(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "set_admin"
+            | "upgrade"
+            | "set_authorized"
+            | "deploy"
+            | "update_admin"
+            | "transfer_admin"
+            | "change_admin"
+    ) || (lower.contains("upgrade") && (lower.contains("contract") || lower.contains("wasm")))
+}
+
+fn is_init_fn(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower == "initialize" || lower == "init" || lower == "initialise"
+}
+
+// ── ArithmeticIssue (NEW) ─────────────────────────────────────────────────────
+
+/// Represents an unchecked arithmetic operation that could overflow or underflow.
+>>>>>>> 6856cf4 (closes 47)
 #[derive(Debug, Serialize, Clone)]
 pub struct PanicIssue {
     pub function_name: String,
@@ -159,6 +247,7 @@ pub struct Analyzer {
 impl Analyzer {
     pub fn new(config: SanctifyConfig) -> Self { Self { config } }
 
+<<<<<<< HEAD
     pub fn analyze_custom_rules(&self, source: &str) -> Vec<CustomRuleMatch> {
         let mut matches = Vec::new();
         for rule in &self.config.rules {
@@ -166,12 +255,35 @@ impl Analyzer {
             for (line_no, line) in source.lines().enumerate() {
                 if re.find(line).is_some() {
                     matches.push(CustomRuleMatch { rule_name: rule.name.clone(), line: line_no + 1, snippet: line.trim().to_string() });
+=======
+    pub fn scan_auth_gaps(&self, source: &str) -> Vec<String> {
+        let file = match parse_str::<File>(source) {
+            Ok(f) => f,
+            Err(_) => return vec![],
+        };
+
+        let mut gaps = Vec::new();
+
+        for item in &file.items {
+            if let Item::Impl(i) = item {
+                for impl_item in &i.items {
+                    if let syn::ImplItem::Fn(f) = impl_item {
+                        let fn_name = f.sig.ident.to_string();
+                        let mut has_mutation = false;
+                        let mut has_auth = false;
+                        self.check_fn_body(&f.block, &mut has_mutation, &mut has_auth);
+                        if has_mutation && !has_auth {
+                            gaps.push(fn_name);
+                        }
+                    }
+>>>>>>> 6856cf4 (closes 47)
                 }
             }
         }
         matches
     }
 
+<<<<<<< HEAD
     pub fn scan_auth_gaps(&self, source: &str) -> Vec<String> {
         with_panic_guard(|| self.scan_auth_gaps_impl(source))
     }
@@ -179,6 +291,8 @@ impl Analyzer {
     fn scan_auth_gaps_impl(&self, source: &str) -> Vec<String> {
         let file = match parse_str::<File>(source) { Ok(f) => f, Err(_) => return vec![] };
         let mut gaps = Vec::new();
+=======
+>>>>>>> 6856cf4 (closes 47)
         for item in &file.items {
             if let Item::Impl(i) = item {
                 for impl_item in &i.items {
@@ -357,6 +471,7 @@ impl Analyzer {
         visitor.issues
     }
 
+<<<<<<< HEAD
     pub fn scan_gas_estimation(&self, source: &str) -> Vec<GasEstimation> {
         let file = match parse_str::<File>(source) { Ok(f) => f, Err(_) => return vec![] };
         let mut estimator = gas_estimator::GasEstimator::new();
@@ -369,11 +484,103 @@ impl Analyzer {
                             let fn_name = f.sig.ident.to_string();
                             let gas = estimator.estimate_gas(&f.block);
                             estimations.push(GasEstimation { function_name: fn_name, estimated_gas: gas, complexity_score: 0 });
+=======
+    // ── Upgrade pattern analysis ──────────────────────────────────────────────
+
+    /// Analyzes contracts for upgrade mechanisms, init patterns, storage layout
+    /// visibility, and governance (auth on privileged functions).
+    pub fn analyze_upgrade_patterns(&self, source: &str) -> UpgradeReport {
+        let file = match parse_str::<File>(source) {
+            Ok(f) => f,
+            Err(_) => return UpgradeReport::empty(),
+        };
+
+        let mut report = UpgradeReport {
+            findings: Vec::new(),
+            upgrade_mechanisms: Vec::new(),
+            init_functions: Vec::new(),
+            storage_types: Vec::new(),
+            suggestions: Vec::new(),
+        };
+
+        // Collect #[contracttype] storage types
+        for item in &file.items {
+            if let Item::Struct(s) = item {
+                if has_attr(&s.attrs, "contracttype") {
+                    report.storage_types.push(s.ident.to_string());
+                }
+            }
+            if let Item::Enum(e) = item {
+                if has_attr(&e.attrs, "contracttype") {
+                    report.storage_types.push(e.ident.to_string());
+                }
+            }
+        }
+
+        // Walk impl blocks for upgrade-related functions
+        for item in &file.items {
+            if let Item::Impl(impl_block) = item {
+                for impl_item in &impl_block.items {
+                    if let syn::ImplItem::Fn(f) = impl_item {
+                        let fn_name = f.sig.ident.to_string();
+                        let line = f.sig.ident.span().start().line;
+                        let location = format!("{}:{}", fn_name, line);
+
+                        // Admin / upgrade mechanism detection
+                        if is_upgrade_or_admin_fn(&fn_name) {
+                            report.upgrade_mechanisms.push(fn_name.clone());
+                            let has_auth = self.fn_has_auth(&f.block);
+                            if !has_auth {
+                                report.findings.push(UpgradeFinding {
+                                    category: UpgradeCategory::Governance,
+                                    function_name: Some(fn_name.clone()),
+                                    location: location.clone(),
+                                    message: format!(
+                                        "Upgrade/admin function '{}' modifies state without require_auth",
+                                        fn_name
+                                    ),
+                                    suggestion: "Add require_auth or require_auth_for_args before state mutations".to_string(),
+                                });
+                                report.suggestions.push(format!(
+                                    "Ensure '{}' requires admin authorization",
+                                    fn_name
+                                ));
+                            }
+                        }
+
+                        // Init pattern detection
+                        if is_init_fn(&fn_name) {
+                            report.init_functions.push(fn_name.clone());
+                            report.findings.push(UpgradeFinding {
+                                category: UpgradeCategory::InitPattern,
+                                function_name: Some(fn_name.clone()),
+                                location: location.clone(),
+                                message: format!("Initialization function '{}' detected", fn_name),
+                                suggestion: "Ensure init is only callable once; consider using a flag in storage".to_string(),
+                            });
+                        }
+
+                        // Timelock heuristics: look for delay/timelock in name or body
+                        if fn_name.to_lowercase().contains("upgrade")
+                            && self.fn_references_delay(&f.block)
+                        {
+                            report.findings.push(UpgradeFinding {
+                                category: UpgradeCategory::Timelock,
+                                function_name: Some(fn_name.clone()),
+                                location: location.clone(),
+                                message: format!(
+                                    "Upgrade function '{}' may use delay/timelock",
+                                    fn_name
+                                ),
+                                suggestion: "Verify timelock delay is enforced before upgrade".to_string(),
+                            });
+>>>>>>> 6856cf4 (closes 47)
                         }
                     }
                 }
             }
         }
+<<<<<<< HEAD
         estimations
     }
 
@@ -391,6 +598,32 @@ impl Analyzer {
         }
         DISCRIMINANT_SIZE + max_variant
     }
+=======
+
+        // Storage layout suggestions
+        if report.storage_types.len() > 1 {
+            report.suggestions.push(format!(
+                "Track storage types [{}] across versions; avoid reordering or removing fields",
+                report.storage_types.join(", ")
+            ));
+        }
+
+        report
+    }
+
+    fn fn_has_auth(&self, block: &syn::Block) -> bool {
+        let mut has = false;
+        self.check_fn_body(block, &mut false, &mut has);
+        has
+    }
+
+    fn fn_references_delay(&self, block: &syn::Block) -> bool {
+        let s = quote::quote!(#block).to_string();
+        s.contains("delay") || s.contains("timelock") || s.contains("ledger_seq")
+    }
+
+    // ── Size estimation helpers ───────────────────────────────────────────────
+>>>>>>> 6856cf4 (closes 47)
 
     fn estimate_struct_size(&self, s: &syn::ItemStruct) -> usize {
         let mut total = 0;
@@ -429,8 +662,143 @@ fn has_contracttype(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| if let Meta::Path(path) = &attr.meta { path.is_ident("contracttype") || path.segments.iter().any(|s| s.ident == "contracttype") } else { false })
 }
 
+<<<<<<< HEAD
 fn classify_size(size: usize, limit: usize, approaching: usize, strict: bool, strict_threshold: usize) -> Option<SizeWarningLevel> {
     if size > limit { Some(SizeWarningLevel::ExceedsLimit) } else if size > approaching || (strict && size > strict_threshold) { Some(SizeWarningLevel::ApproachingLimit) } else { None }
+=======
+impl<'ast> Visit<'ast> for UnsafeVisitor {
+    fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
+        let method_name = i.method.to_string();
+        if method_name == "unwrap" || method_name == "expect" {
+            let pattern_type = if method_name == "unwrap" {
+                PatternType::Unwrap
+            } else {
+                PatternType::Expect
+            };
+            self.patterns.push(UnsafePattern {
+                pattern_type,
+                snippet: quote::quote!(#i).to_string(),
+                line: 0, // Simplified for now
+            });
+        }
+        visit::visit_expr_method_call(self, i);
+    }
+
+    fn visit_expr_macro(&mut self, i: &'ast syn::ExprMacro) {
+        if i.mac.path.is_ident("panic") {
+            self.patterns.push(UnsafePattern {
+                pattern_type: PatternType::Panic,
+                snippet: quote::quote!(#i).to_string(),
+                line: 0,
+            });
+        }
+        visit::visit_expr_macro(self, i);
+    }
+}
+
+/// Trait for contracts that can validate their invariant at runtime.
+pub trait SanctifiedGuard {
+    fn check_invariant(&self, env: &Env) -> Result<(), String>;
+}
+
+// ── ArithVisitor ──────────────────────────────────────────────────────────────
+
+struct ArithVisitor {
+    issues: Vec<ArithmeticIssue>,
+    /// Name of the function currently being visited.
+    current_fn: Option<String>,
+    /// De-duplicates issues: one per (function_name, operator) pair.
+    seen: HashSet<(String, String)>,
+}
+
+impl ArithVisitor {
+    /// Returns `(operator_str, suggestion_text)` for overflow-prone binary ops,
+    /// or `None` for operators that cannot overflow (comparisons, bitwise, etc).
+    fn classify_op(op: &syn::BinOp) -> Option<(&'static str, &'static str)> {
+        match op {
+            syn::BinOp::Add(_) => Some((
+                "+",
+                "Use `.checked_add(rhs)` or `.saturating_add(rhs)` to handle overflow",
+            )),
+            syn::BinOp::Sub(_) => Some((
+                "-",
+                "Use `.checked_sub(rhs)` or `.saturating_sub(rhs)` to handle underflow",
+            )),
+            syn::BinOp::Mul(_) => Some((
+                "*",
+                "Use `.checked_mul(rhs)` or `.saturating_mul(rhs)` to handle overflow",
+            )),
+            syn::BinOp::AddAssign(_) => Some((
+                "+=",
+                "Replace `a += b` with `a = a.checked_add(b).expect(\"overflow\")`",
+            )),
+            syn::BinOp::SubAssign(_) => Some((
+                "-=",
+                "Replace `a -= b` with `a = a.checked_sub(b).expect(\"underflow\")`",
+            )),
+            syn::BinOp::MulAssign(_) => Some((
+                "*=",
+                "Replace `a *= b` with `a = a.checked_mul(b).expect(\"overflow\")`",
+            )),
+            _ => None,
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for ArithVisitor {
+    /// Track the current function when descending into an impl method.
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let prev = self.current_fn.take();
+        self.current_fn = Some(node.sig.ident.to_string());
+        visit::visit_impl_item_fn(self, node);
+        self.current_fn = prev;
+    }
+
+    /// Also handle top-level `fn` items (helper functions outside impls).
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let prev = self.current_fn.take();
+        self.current_fn = Some(node.sig.ident.to_string());
+        visit::visit_item_fn(self, node);
+        self.current_fn = prev;
+    }
+
+    fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
+        if let Some(fn_name) = self.current_fn.clone() {
+            if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
+                // Skip concatenation of string literals (false positive for `+`)
+                if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                    let key = (fn_name.clone(), op_str.to_string());
+                    if !self.seen.contains(&key) {
+                        self.seen.insert(key);
+                        // Line number from the left operand's span
+                        let line = node.left.span().start().line;
+                        self.issues.push(ArithmeticIssue {
+                            function_name: fn_name.clone(),
+                            operation: op_str.to_string(),
+                            suggestion: suggestion.to_string(),
+                            location: format!("{}:{}", fn_name, line),
+                        });
+                    }
+                }
+            }
+        }
+        // Continue descending so nested binary ops are also checked
+        visit::visit_expr_binary(self, node);
+    }
+}
+
+/// Returns `true` if the expression is a string literal — used to avoid
+/// false-positives on `+` for string concatenation (rare in no_std Soroban
+/// but included for correctness).
+fn is_string_literal(expr: &syn::Expr) -> bool {
+    matches!(
+        expr,
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(_),
+            ..
+        })
+    )
+>>>>>>> 6856cf4 (closes 47)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -503,6 +871,7 @@ impl<'ast> Visit<'ast> for UnsafeVisitor {
         }
         visit::visit_macro(self, node);
     }
+<<<<<<< HEAD
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         let method = node.method.to_string();
         if method == "unwrap" || method == "expect" {
@@ -511,6 +880,172 @@ impl<'ast> Visit<'ast> for UnsafeVisitor {
             self.patterns.push(UnsafePattern { pattern_type, line, snippet: format!(".{}()", method) });
         }
         visit::visit_expr_method_call(self, node);
+=======
+
+    // ── Arithmetic overflow tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_scan_arithmetic_overflow_basic() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn add_balances(env: Env, a: u64, b: u64) -> u64 {
+                    a + b
+                }
+
+                pub fn subtract(env: Env, total: u128, amount: u128) -> u128 {
+                    total - amount
+                }
+
+                pub fn multiply(env: Env, price: u64, qty: u64) -> u64 {
+                    price * qty
+                }
+
+                pub fn safe_add(env: Env, a: u64, b: u64) -> Option<u64> {
+                    a.checked_add(b)
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        // Three distinct (function, operator) pairs flagged
+        assert_eq!(issues.len(), 3);
+
+        let ops: Vec<&str> = issues.iter().map(|i| i.operation.as_str()).collect();
+        assert!(ops.contains(&"+"));
+        assert!(ops.contains(&"-"));
+        assert!(ops.contains(&"*"));
+
+        // safe_add uses checked_add — no bare + operator, so not flagged
+        assert!(issues.iter().all(|i| i.function_name != "safe_add"));
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_compound_assign() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl Token {
+                pub fn accumulate(env: Env, mut balance: u64, amount: u64) -> u64 {
+                    balance += amount;
+                    balance -= 1;
+                    balance *= 2;
+                    balance
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        // One issue per compound operator per function
+        assert_eq!(issues.len(), 3);
+        let ops: Vec<&str> = issues.iter().map(|i| i.operation.as_str()).collect();
+        assert!(ops.contains(&"+="));
+        assert!(ops.contains(&"-="));
+        assert!(ops.contains(&"*="));
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_deduplication() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn sum_three(env: Env, a: u64, b: u64, c: u64) -> u64 {
+                    // Two `+` operations — should produce only ONE issue for this function
+                    a + b + c
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].operation, "+");
+        assert_eq!(issues[0].function_name, "sum_three");
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_no_false_positive_safe_code() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn compare(env: Env, a: u64, b: u64) -> bool {
+                    a > b
+                }
+
+                pub fn bitwise(env: Env, a: u32) -> u32 {
+                    a & 0xFF
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert!(
+            issues.is_empty(),
+            "Expected no issues but found: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_custom_wrapper_types() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        // Custom type wrapping a primitive — arithmetic on it is still flagged
+        let source = r#"
+            #[contractimpl]
+            impl Vault {
+                pub fn add_shares(env: Env, current: Shares, delta: Shares) -> Shares {
+                    Shares(current.0 + delta.0)
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].operation, "+");
+    }
+
+    #[test]
+    fn test_analyze_upgrade_patterns() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contracttype]
+            pub enum DataKey { Admin, Balance }
+
+            #[contractimpl]
+            impl Token {
+                pub fn initialize(env: Env, admin: Address) {
+                    env.storage().instance().set(&DataKey::Admin, &admin);
+                }
+                pub fn set_admin(env: Env, new_admin: Address) {
+                    env.storage().instance().set(&DataKey::Admin, &new_admin);
+                }
+            }
+        "#;
+        let report = analyzer.analyze_upgrade_patterns(source);
+        assert_eq!(report.init_functions, vec!["initialize"]);
+        assert_eq!(report.upgrade_mechanisms, vec!["set_admin"]);
+        assert!(report.storage_types.contains(&"DataKey".to_string()));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| matches!(f.category, UpgradeCategory::Governance)));
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_suggestion_content() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn risky(env: Env, a: u64, b: u64) -> u64 {
+                    a + b
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert_eq!(issues.len(), 1);
+        // Suggestion should mention checked_add
+        assert!(issues[0].suggestion.contains("checked_add"));
+        // Location should include function name
+        assert!(issues[0].location.starts_with("risky:"));
+>>>>>>> 6856cf4 (closes 47)
     }
 }
 
