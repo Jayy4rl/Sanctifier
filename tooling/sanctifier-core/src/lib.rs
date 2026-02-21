@@ -1,7 +1,8 @@
 use soroban_sdk::Env;
-use syn::{parse_str, File, Item, Type, Fields, Meta, ExprMacro, ExprMethodCall, Macro};
+use syn::{parse_str, File, Item, Type, Fields, Meta, ExprMethodCall, Macro};
 use syn::visit::{self, Visit};
 use serde::Serialize;
+use thiserror::Error;
 
 #[derive(Debug, Serialize)]
 pub struct SizeWarning {
@@ -22,6 +23,18 @@ pub struct UnsafePattern {
     pub pattern_type: PatternType,
     pub line: usize,
     pub snippet: String,
+}
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("invariant violation: {0}")]
+    InvariantViolation(String),
+    #[error("internal error: {0}")]
+    Internal(String),
+}
+
+pub trait SanctifiedGuard {
+    fn check_invariant(&self, env: &Env) -> Result<(), Error>;
 }
 
 struct UnsafeVisitor {
@@ -71,7 +84,7 @@ impl Analyzer {
         vec![]
     }
 
-    pub fn check_storage_collisions(&self, keys: Vec<String>) -> bool {
+    pub fn check_storage_collisions(&self, _keys: Vec<String>) -> bool {
         // Placeholder for collision detection
         false
     }
@@ -160,9 +173,7 @@ impl Analyzer {
     }
 }
 
-pub trait SanctifiedGuard {
-    fn check_invariant(&self, env: &Env) -> Result<(), String>;
-}
+
 
 #[cfg(test)]
 mod tests {
