@@ -1,7 +1,11 @@
 use soroban_sdk::Env;
+<<<<<<< HEAD
 use syn::{parse_str, File, Item, Type, Fields, Meta, ExprMethodCall, Macro};
 use syn::visit::{self, Visit};
 use syn::spanned::Spanned;
+=======
+use syn::{parse_str, File, Item, Type, Fields, Meta};
+>>>>>>> 525a41d (feat(cli): add unified JSON output for --format json (#14))
 use serde::Serialize;
 use thiserror::Error;
 use std::collections::HashSet;
@@ -36,6 +40,7 @@ pub struct PanicIssue {
     pub location: String,
 }
 
+<<<<<<< HEAD
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("invariant violation: {0}")]
@@ -65,6 +70,17 @@ pub struct ArithmeticIssue {
 
 // ── Analyzer ──────────────────────────────────────────────────────────────────
 
+=======
+/// Unified finding for machine-readable (JSON) output.
+#[derive(Debug, Serialize, Clone)]
+pub struct Finding {
+    pub severity: String,
+    pub file: String,
+    pub line: usize,
+    pub message: String,
+}
+
+>>>>>>> 525a41d (feat(cli): add unified JSON output for --format json (#14))
 pub struct Analyzer {
     pub strict_mode: bool,
     pub ledger_limit: usize,
@@ -321,6 +337,7 @@ impl Analyzer {
         warnings
     }
 
+<<<<<<< HEAD
     // ── Unsafe-pattern visitor ────────────────────────────────────────────────
 
     /// Visitor-based scan for `panic!`, `.unwrap()`, `.expect()` with line
@@ -362,6 +379,8 @@ impl Analyzer {
 
     // ── Size estimation helpers ───────────────────────────────────────────────
 
+=======
+>>>>>>> 525a41d (feat(cli): add unified JSON output for --format json (#14))
     fn estimate_struct_size(&self, s: &syn::ItemStruct) -> usize {
         let mut total = 0;
         match &s.fields {
