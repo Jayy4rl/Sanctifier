@@ -19,3 +19,7 @@ regex = "1.10.3"
 [[bin]]
 name = "sanctifier"
 path = "src/main.rs"
+
+[dev-dependencies]
+assert_cmd = "2.1.2"
+predicates = "3.1.4"
