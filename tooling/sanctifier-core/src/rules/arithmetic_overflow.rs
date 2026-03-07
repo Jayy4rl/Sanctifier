@@ -139,6 +139,67 @@ impl<'ast> Visit<'ast> for ArithVisitor {
         }
         syn::visit::visit_expr_binary(self, node);
     }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if let Some(fn_name) = self.current_fn.clone() {
+            let method_name = node.method.to_string();
+            if let Some(suggestion) = classify_math_method(&method_name) {
+                let key = (fn_name.clone(), method_name.clone());
+                if !self.seen.contains(&key) {
+                    self.seen.insert(key);
+                    let line = node.span().start().line;
+                    self.issues.push(ArithmeticIssue {
+                        operation: method_name,
+                        suggestion,
+                        location: format!("{}:{}", fn_name, line),
+                    });
+                }
+            }
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let Some(fn_name) = self.current_fn.clone() {
+            if let syn::Expr::Path(expr_path) = &*node.func {
+                if let Some(last_segment) = expr_path.path.segments.last() {
+                    let func_name = last_segment.ident.to_string();
+                    if let Some(suggestion) = classify_math_call(&func_name) {
+                        let key = (fn_name.clone(), func_name.clone());
+                        if !self.seen.contains(&key) {
+                            self.seen.insert(key);
+                            let line = node.span().start().line;
+                            self.issues.push(ArithmeticIssue {
+                                operation: func_name,
+                                suggestion,
+                                location: format!("{}:{}", fn_name, line),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+}
+
+fn classify_math_method(method: &str) -> Option<String> {
+    match method {
+        "mul_div" => Some("Use '.checked_mul_div()' to handle potential overflow".to_string()),
+        "div_ceil" => Some("Consider '.checked_div()' if boundary verification is required".to_string()),
+        "fixed_point_mul" => Some("Use '.checked_fixed_point_mul()' for safety".to_string()),
+        "fixed_point_div" => Some("Use '.checked_fixed_point_div()' for safety".to_string()),
+        _ => None,
+    }
+}
+
+fn classify_math_call(func: &str) -> Option<String> {
+    match func {
+        "mul_div" => Some("Use 'checked_mul_div' to handle potential overflow".to_string()),
+        "fixed_point_mul" => Some("Use 'checked_fixed_point_mul' for safety".to_string()),
+        "fixed_point_div" => Some("Use 'checked_fixed_point_div' for safety".to_string()),
+        _ => None,
+    }
 }
 
 fn is_string_literal(expr: &syn::Expr) -> bool {
@@ -149,4 +210,69 @@ fn is_string_literal(expr: &syn::Expr) -> bool {
             ..
         })
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flag_standard_arithmetic() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn test() {
+                let a = 1;
+                let b = 2;
+                let c = a + b;
+                let d = a - b;
+                let e = a * b;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 3);
+    }
+
+    #[test]
+    fn test_flag_custom_math_methods() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn test() {
+                let a = 1;
+                let b = 2;
+                let c = a.mul_div(5, 10);
+                let d = a.fixed_point_mul(b);
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(violations.iter().any(|v| v.message.contains("mul_div")));
+        assert!(violations.iter().any(|v| v.message.contains("fixed_point_mul")));
+    }
+
+    #[test]
+    fn test_flag_custom_math_calls() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn test() {
+                let a = mul_div(1, 2, 3);
+                let b = fixed_point_div(10, 2);
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(violations.iter().any(|v| v.message.contains("mul_div")));
+        assert!(violations.iter().any(|v| v.message.contains("fixed_point_div")));
+    }
+
+    #[test]
+    fn test_ignore_checked_methods() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn test() {
+                let a = 1;
+                let b = a.checked_add(2);
+                let c = a.checked_mul_div(5, 10);
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 0);
+    }
 }
