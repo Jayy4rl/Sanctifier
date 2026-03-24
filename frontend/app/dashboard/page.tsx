@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
-import type { AnalysisReport, CallGraphNode, CallGraphEdge, Finding, Severity } from "../types";
-import { transformReport, extractCallGraph } from "../lib/transform";
+import { useState, useCallback } from "react";
+import type { CallGraphNode, CallGraphEdge, Finding, Severity } from "../types";
+import { transformReport, extractCallGraph, normalizeReport } from "../lib/transform";
 import { exportToPdf } from "../lib/export-pdf";
 import { SeverityFilter } from "../components/SeverityFilter";
 import { FindingsList } from "../components/FindingsList";
@@ -22,6 +22,23 @@ const SAMPLE_JSON = `{
 
 type Tab = "findings" | "callgraph";
 
+function extractErrorMessage(payload: unknown, fallback: string): string {
+  if (typeof payload === "string" && payload.trim()) {
+    return payload;
+  }
+
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "error" in payload &&
+    typeof payload.error === "string"
+  ) {
+    return payload.error;
+  }
+
+  return fallback;
+}
+
 export default function DashboardPage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [callGraphNodes, setCallGraphNodes] = useState<CallGraphNode[]>([]);
@@ -30,28 +47,29 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [jsonInput, setJsonInput] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("findings");
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [isUploadingContract, setIsUploadingContract] = useState(false);
+
+  const applyReport = useCallback((rawReport: unknown) => {
+    const report = normalizeReport(rawReport);
+    setFindings(transformReport(report));
+    const { nodes, edges } = extractCallGraph(report);
+    setCallGraphNodes(nodes);
+    setCallGraphEdges(edges);
+  }, []);
 
   const parseReport = useCallback((text: string) => {
     setError(null);
+    setUploadStatus(null);
     try {
-      const parsed = JSON.parse(text || SAMPLE_JSON) as AnalysisReport;
-
-      // Handle new CI/CD format with nested "findings" key
-      const report = (parsed as Record<string, unknown>).findings
-        ? ((parsed as Record<string, unknown>).findings as AnalysisReport)
-        : parsed;
-
-      setFindings(transformReport(report));
-      const { nodes, edges } = extractCallGraph(report);
-      setCallGraphNodes(nodes);
-      setCallGraphEdges(edges);
+      applyReport(JSON.parse(text || SAMPLE_JSON));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid JSON");
       setFindings([]);
       setCallGraphNodes([]);
       setCallGraphEdges([]);
     }
-  }, []);
+  }, [applyReport]);
 
   const loadReport = useCallback(() => {
     parseReport(jsonInput);
@@ -70,7 +88,57 @@ export default function DashboardPage() {
     e.target.value = "";
   }, [parseReport]);
 
+  const handleContractUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setError(null);
+    setUploadStatus(`Analyzing ${file.name}...`);
+    setIsUploadingContract(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("contract", file);
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+      const rawBody = await response.text();
+
+      let payload: unknown = null;
+      if (rawBody) {
+        try {
+          payload = JSON.parse(rawBody);
+        } catch {
+          payload = rawBody;
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(extractErrorMessage(payload, "Contract analysis failed"));
+      }
+
+      setJsonInput(JSON.stringify(payload, null, 2));
+      applyReport(payload);
+      setUploadStatus(`Analysis report ready for ${file.name}.`);
+    } catch (uploadError) {
+      setUploadStatus(null);
+      setError(
+        uploadError instanceof Error ? uploadError.message : "Contract analysis failed"
+      );
+    } finally {
+      setIsUploadingContract(false);
+    }
+  }, [applyReport]);
+
   const hasData = findings.length > 0;
+  const hasLoadedReport = jsonInput.trim().length > 0;
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 theme-high-contrast:bg-black theme-high-contrast:text-white">
@@ -96,7 +164,7 @@ export default function DashboardPage() {
         <section className="rounded-lg border border-zinc-200 dark:border-zinc-800 theme-high-contrast:border-white bg-white dark:bg-zinc-900 theme-high-contrast:bg-black p-6">
           <h2 className="text-lg font-semibold mb-4 theme-high-contrast:text-yellow-300">Load Analysis Report</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400 theme-high-contrast:text-white mb-4">
-            Paste JSON from <code className="bg-zinc-100 dark:bg-zinc-800 theme-high-contrast:bg-zinc-900 px-1 rounded">sanctifier analyze --format json</code> or upload a file.
+            Paste JSON from <code className="bg-zinc-100 dark:bg-zinc-800 theme-high-contrast:bg-zinc-900 px-1 rounded">sanctifier analyze --format json</code>, upload an existing report, or analyze a Rust contract source file.
           </p>
           <div className="flex flex-wrap gap-2 sm:gap-4">
             <label className="flex-1 sm:flex-none text-center cursor-pointer rounded-lg border border-zinc-300 dark:border-zinc-600 theme-high-contrast:border-white px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 theme-high-contrast:hover:bg-zinc-900">
@@ -105,7 +173,20 @@ export default function DashboardPage() {
                 type="file"
                 accept=".json"
                 className="hidden"
+                aria-label="JSON report file"
+                data-testid="json-upload-input"
                 onChange={handleFileUpload}
+              />
+            </label>
+            <label className="flex-1 sm:flex-none text-center cursor-pointer rounded-lg border border-zinc-300 dark:border-zinc-600 theme-high-contrast:border-white px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 theme-high-contrast:hover:bg-zinc-900">
+              {isUploadingContract ? "Analyzing Contract..." : "Upload Contract"}
+              <input
+                type="file"
+                accept=".rs"
+                className="hidden"
+                aria-label="Contract file"
+                data-testid="contract-upload-input"
+                onChange={handleContractUpload}
               />
             </label>
             <button
@@ -124,6 +205,11 @@ export default function DashboardPage() {
               Export PDF
             </button>
           </div>
+          {uploadStatus && (
+            <p className="mt-2 text-sm text-emerald-600 dark:text-emerald-400" role="status" aria-live="polite">
+              {uploadStatus}
+            </p>
+          )}
           {error && (
             <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
           )}
@@ -186,9 +272,15 @@ export default function DashboardPage() {
           </>
         )}
 
-        {!hasData && !error && (
+        {!hasData && !error && !hasLoadedReport && (
           <p className="text-center text-zinc-500 dark:text-zinc-400 py-12">
             Load a report to view findings.
+          </p>
+        )}
+
+        {!hasData && !error && hasLoadedReport && (
+          <p className="text-center text-zinc-500 dark:text-zinc-400 py-12">
+            No findings were detected in the loaded report.
           </p>
         )}
       </main>

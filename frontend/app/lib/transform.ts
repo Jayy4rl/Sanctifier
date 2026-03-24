@@ -1,5 +1,40 @@
 import type { AnalysisReport, CallGraphEdge, CallGraphNode, Finding, Severity } from "../types";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function arrayValue<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+export function normalizeReport(input: unknown): AnalysisReport {
+  const parsed = isRecord(input) ? input : {};
+  const findings = isRecord(parsed.findings) ? parsed.findings : parsed;
+  const authGaps = arrayValue<string | { function?: string }>(findings.auth_gaps).flatMap((gap) => {
+    if (typeof gap === "string") {
+      return [gap];
+    }
+
+    if (isRecord(gap) && typeof gap.function === "string") {
+      return [gap.function];
+    }
+
+    return [];
+  });
+
+  return {
+    size_warnings: arrayValue(findings.size_warnings ?? findings.ledger_size_warnings),
+    unsafe_patterns: arrayValue(findings.unsafe_patterns),
+    auth_gaps: authGaps,
+    panic_issues: arrayValue(findings.panic_issues),
+    arithmetic_issues: arrayValue(findings.arithmetic_issues),
+    custom_rule_matches: arrayValue(
+      findings.custom_rule_matches ?? findings.custom_rules
+    ),
+  };
+}
+
 function toFinding(
   id: string,
   severity: Severity,
