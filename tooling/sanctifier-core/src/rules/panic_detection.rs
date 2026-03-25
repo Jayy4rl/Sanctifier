@@ -45,13 +45,39 @@ impl Rule for PanicDetectionRule {
 
         let mut issues = Vec::new();
         for item in &file.items {
-            if let syn::Item::Impl(i) = item {
-                for impl_item in &i.items {
-                    if let syn::ImplItem::Fn(f) = impl_item {
-                        let fn_name = f.sig.ident.to_string();
-                        check_fn_panics(&f.block, &fn_name, &mut issues);
+            match item {
+                syn::Item::Impl(i) => {
+                    if is_cfg_test_item(&i.attrs) {
+                        continue;
+                    }
+                    for impl_item in &i.items {
+                        if let syn::ImplItem::Fn(f) = impl_item {
+                            if has_test_attr(&f.attrs) {
+                                continue;
+                            }
+                            let fn_name = f.sig.ident.to_string();
+                            check_fn_panics(&f.block, &fn_name, &mut issues);
+                        }
                     }
                 }
+                syn::Item::Mod(m) => {
+                    if is_cfg_test_item(&m.attrs) {
+                        continue; // Skip entire #[cfg(test)] modules
+                    }
+                    // Individual standalone fns at module level
+                    if let Some((_, items)) = &m.content {
+                        for item in items {
+                            if let syn::Item::Fn(f) = item {
+                                if has_test_attr(&f.attrs) {
+                                    continue;
+                                }
+                                let fn_name = f.sig.ident.to_string();
+                                check_fn_panics(&f.block, &fn_name, &mut issues);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -150,3 +176,86 @@ fn check_expr_panics(expr: &syn::Expr, fn_name: &str, issues: &mut Vec<PanicIssu
 }
 
 use serde::Serialize;
+
+/// Returns `true` if any attribute is `#[test]`.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("test"))
+}
+
+/// Returns `true` if any attribute is `#[cfg(test)]`.
+fn is_cfg_test_item(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        a.path().is_ident("cfg")
+            && quote::quote!(#a).to_string().contains("test")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flags_unwrap_in_contract_fn() {
+        let rule = PanicDetectionRule::new();
+        let source = r#"
+            impl Contract {
+                pub fn transfer(e: Env) {
+                    let x: Option<u32> = None;
+                    let _ = x.unwrap();
+                }
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(!violations.is_empty(), "unwrap in contract fn should fire");
+    }
+
+    #[test]
+    fn test_skip_test_attribute_function() {
+        let rule = PanicDetectionRule::new();
+        let source = r#"
+            impl Contract {
+                #[test]
+                fn unit_test() {
+                    let x: Option<u32> = None;
+                    let _ = x.unwrap();
+                    panic!("boom");
+                }
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 0, "#[test] impl fn must be skipped");
+    }
+
+    #[test]
+    fn test_skip_cfg_test_impl() {
+        let rule = PanicDetectionRule::new();
+        let source = r#"
+            #[cfg(test)]
+            impl ContractTests {
+                pub fn helper() {
+                    let x: Option<u32> = None;
+                    let _ = x.unwrap();
+                }
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 0, "#[cfg(test)] impl block must be skipped");
+    }
+
+    #[test]
+    fn test_skip_cfg_test_module() {
+        let rule = PanicDetectionRule::new();
+        let source = r#"
+            #[cfg(test)]
+            mod tests {
+                fn helper() {
+                    let x: Option<u32> = None;
+                    let _ = x.unwrap();
+                    panic!("boom");
+                }
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 0, "#[cfg(test)] module must be skipped");
+    }
+}

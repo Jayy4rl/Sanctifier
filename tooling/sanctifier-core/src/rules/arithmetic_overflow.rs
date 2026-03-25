@@ -40,6 +40,8 @@ impl Rule for ArithmeticOverflowRule {
             issues: Vec::new(),
             current_fn: None,
             seen: HashSet::new(),
+            index_depth: 0,
+            test_mod_depth: 0,
         };
         visitor.visit_file(&file);
 
@@ -67,6 +69,10 @@ pub(crate) struct ArithVisitor {
     pub(crate) issues: Vec<ArithmeticIssue>,
     pub(crate) current_fn: Option<String>,
     pub(crate) seen: HashSet<(String, String)>,
+    /// When >0 we are inside an array-index expression and skip arithmetic.
+    pub(crate) index_depth: u32,
+    /// When >0 we are inside a #[cfg(test)] module and skip everything.
+    pub(crate) test_mod_depth: u32,
 }
 
 // Redundant ArithmeticIssue struct removed
@@ -104,7 +110,21 @@ impl ArithVisitor {
 }
 
 impl<'ast> Visit<'ast> for ArithVisitor {
+    // ── Module-level: skip #[cfg(test)] modules entirely ─────────────────────
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if is_cfg_test(&node.attrs) {
+            self.test_mod_depth += 1;
+            syn::visit::visit_item_mod(self, node);
+            self.test_mod_depth -= 1;
+        } else {
+            syn::visit::visit_item_mod(self, node);
+        }
+    }
+
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if self.test_mod_depth > 0 || has_test_attr(&node.attrs) {
+            return;
+        }
         let prev = self.current_fn.take();
         self.current_fn = Some(node.sig.ident.to_string());
         syn::visit::visit_impl_item_fn(self, node);
@@ -112,26 +132,41 @@ impl<'ast> Visit<'ast> for ArithVisitor {
     }
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if self.test_mod_depth > 0 || has_test_attr(&node.attrs) {
+            return;
+        }
         let prev = self.current_fn.take();
         self.current_fn = Some(node.sig.ident.to_string());
         syn::visit::visit_item_fn(self, node);
         self.current_fn = prev;
     }
 
+    // ── Index expressions: don't flag arithmetic in subscripts ────────────────
+    fn visit_expr_index(&mut self, node: &'ast syn::ExprIndex) {
+        // Visit the object expression normally (it may contain calls, etc.)
+        self.visit_expr(&node.expr);
+        // Increase depth so arithmetic inside the index is suppressed.
+        self.index_depth += 1;
+        self.visit_expr(&node.index);
+        self.index_depth -= 1;
+    }
+
     fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
-        if let Some(fn_name) = self.current_fn.clone() {
-            if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
-                if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
-                    let key = (fn_name.clone(), op_str.to_string());
-                    if !self.seen.contains(&key) {
-                        self.seen.insert(key);
-                        let line = node.left.span().start().line;
-                        self.issues.push(ArithmeticIssue {
-                            function_name: fn_name.clone(),
-                            operation: op_str.to_string(),
-                            suggestion: suggestion.to_string(),
-                            location: format!("{}:{}", fn_name, line),
-                        });
+        if self.index_depth == 0 {
+            if let Some(fn_name) = self.current_fn.clone() {
+                if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
+                    if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                        let key = (fn_name.clone(), op_str.to_string());
+                        if !self.seen.contains(&key) {
+                            self.seen.insert(key);
+                            let line = node.left.span().start().line;
+                            self.issues.push(ArithmeticIssue {
+                                function_name: fn_name.clone(),
+                                operation: op_str.to_string(),
+                                suggestion: suggestion.to_string(),
+                                location: format!("{}:{}", fn_name, line),
+                            });
+                        }
                     }
                 }
             }
@@ -215,6 +250,19 @@ fn is_string_literal(expr: &syn::Expr) -> bool {
     )
 }
 
+/// Returns true if the item has a `#[test]` attribute.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("test"))
+}
+
+/// Returns true if the item has a `#[cfg(test)]` attribute.
+fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        a.path().is_ident("cfg")
+            && quote::quote!(#a).to_string().contains("test")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,7 +271,7 @@ mod tests {
     fn test_flag_standard_arithmetic() {
         let rule = ArithmeticOverflowRule::new();
         let source = r#"
-            fn test() {
+            fn transfer() {
                 let a = 1;
                 let b = 2;
                 let c = a + b;
@@ -239,7 +287,7 @@ mod tests {
     fn test_flag_custom_math_methods() {
         let rule = ArithmeticOverflowRule::new();
         let source = r#"
-            fn test() {
+            fn transfer() {
                 let a = 1;
                 let b = 2;
                 let c = a.mul_div(5, 10);
@@ -257,7 +305,7 @@ mod tests {
     fn test_flag_custom_math_calls() {
         let rule = ArithmeticOverflowRule::new();
         let source = r#"
-            fn test() {
+            fn transfer() {
                 let a = mul_div(1, 2, 3);
                 let b = fixed_point_div(10, 2);
             }
@@ -273,7 +321,7 @@ mod tests {
     fn test_ignore_checked_methods() {
         let rule = ArithmeticOverflowRule::new();
         let source = r#"
-            fn test() {
+            fn transfer() {
                 let a = 1;
                 let b = a.checked_add(2);
                 let c = a.checked_mul_div(5, 10);
@@ -281,5 +329,58 @@ mod tests {
         "#;
         let violations = rule.check(source);
         assert_eq!(violations.len(), 0);
+    }
+
+    #[test]
+    fn test_skip_test_attribute_functions() {
+        let rule = ArithmeticOverflowRule::new();
+        // A #[test] fn with arithmetic should produce zero violations.
+        let source = r#"
+            #[test]
+            fn my_unit_test() {
+                let a = 1u64;
+                let b = 2u64;
+                let c = a + b;
+                let d = a - b;
+                let e = a * b;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 0, "#[test] fns must be skipped");
+    }
+
+    #[test]
+    fn test_skip_cfg_test_module() {
+        let rule = ArithmeticOverflowRule::new();
+        // All arithmetic inside #[cfg(test)] mod must be ignored.
+        let source = r#"
+            fn mint(amount: u64) {
+                let total = amount + 1;
+            }
+
+            #[cfg(test)]
+            mod tests {
+                fn helper() {
+                    let x = 1u64 + 2u64;
+                    let y = x * 10u64;
+                }
+            }
+        "#;
+        let violations = rule.check(source);
+        // Only `mint` should fire (1 finding for `+`), not the cfg(test) helper.
+        assert_eq!(violations.len(), 1, "cfg(test) module arithmetic must be skipped");
+    }
+
+    #[test]
+    fn test_skip_index_subscript_arithmetic() {
+        let rule = ArithmeticOverflowRule::new();
+        // i + 1 as an array subscript is idiomatic and should not trigger.
+        let source = r#"
+            fn read_next(buf: &[u8], i: usize) -> u8 {
+                buf[i + 1]
+            }
+        "#;
+        let violations = rule.check(source);
+        assert_eq!(violations.len(), 0, "index subscript arithmetic must be skipped");
     }
 }
