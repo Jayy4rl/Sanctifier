@@ -2,7 +2,8 @@
 
 use serde::Serialize;
 use std::time::Instant;
-use z3::ast::Int;
+use thiserror::Error;
+use z3::ast::{Bool, Int};
 use z3::{Context, SatResult, Solver};
 
 /// An invariant issue proved by the Z3 SMT solver.
@@ -14,6 +15,82 @@ pub struct SmtInvariantIssue {
     pub description: String,
     /// Source location.
     pub location: String,
+}
+
+/// Supported SMT backends for fixed-point proofs.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SmtBackend {
+    /// Z3 backend.
+    Z3,
+    /// Placeholder for future CVC5 support.
+    Cvc5,
+}
+
+/// Input bounds for a standard fixed-point `a * b / d` proof.
+#[derive(Debug, Serialize, Clone)]
+pub struct FixedPointMulDivSpec {
+    /// Human-readable function or calculation name.
+    pub function_name: String,
+    /// Maximum value of the left multiplicand.
+    pub multiplicand_max: u128,
+    /// Maximum value of the right multiplicand.
+    pub multiplier_max: u128,
+    /// Minimum divisor value (must be > 0).
+    pub divisor_min: u128,
+    /// Maximum divisor value.
+    pub divisor_max: u128,
+    /// Optional bound for the final quotient.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_max: Option<u128>,
+}
+
+/// Concrete witness returned when a fixed-point proof fails.
+#[derive(Debug, Serialize, Clone)]
+pub struct FixedPointCounterexample {
+    /// Value chosen for the left multiplicand.
+    pub multiplicand: String,
+    /// Value chosen for the right multiplicand.
+    pub multiplier: String,
+    /// Value chosen for the divisor.
+    pub divisor: String,
+    /// Intermediate `a * b` result.
+    pub intermediate_product: String,
+    /// Final `(a * b) / d` quotient.
+    pub quotient: String,
+}
+
+/// Result of a fixed-point overflow proof.
+#[derive(Debug, Serialize, Clone)]
+pub struct FixedPointProofReport {
+    /// Human-readable function or calculation name.
+    pub function_name: String,
+    /// Backend used for the proof.
+    pub backend: SmtBackend,
+    /// Whether the proof established safety for all inputs in range.
+    pub proven_safe: bool,
+    /// Properties checked during the proof.
+    pub checked_properties: Vec<String>,
+    /// Summary message.
+    pub message: String,
+    /// Concrete witness if the proof failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterexample: Option<FixedPointCounterexample>,
+}
+
+/// Errors raised when preparing or executing a fixed-point proof.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum FixedPointProofError {
+    /// Invalid input bounds.
+    #[error("invalid fixed-point proof specification: {0}")]
+    InvalidSpec(&'static str),
+    /// The requested backend is not implemented yet.
+    #[error("unsupported SMT backend: {0:?}")]
+    UnsupportedBackend(SmtBackend),
+    /// The backend did not produce a usable answer.
+    #[error("solver did not produce a usable result: {0}")]
+    SolverFailure(&'static str),
 }
 
 /// Z3-backed SMT solver wrapper.
@@ -64,6 +141,28 @@ impl<'ctx> SmtVerifier<'ctx> {
         } else {
             None
         }
+    }
+}
+
+/// Prove that `a * b / d` cannot overflow `u128` within the provided bounds
+/// using the default backend (Z3).
+pub fn prove_fixed_point_mul_div_bounds(
+    spec: &FixedPointMulDivSpec,
+) -> Result<FixedPointProofReport, FixedPointProofError> {
+    prove_fixed_point_mul_div_bounds_with_backend(SmtBackend::Z3, spec)
+}
+
+/// Prove that `a * b / d` cannot overflow `u128` within the provided bounds
+/// using the selected SMT backend.
+pub fn prove_fixed_point_mul_div_bounds_with_backend(
+    backend: SmtBackend,
+    spec: &FixedPointMulDivSpec,
+) -> Result<FixedPointProofReport, FixedPointProofError> {
+    validate_fixed_point_spec(spec)?;
+
+    match backend {
+        SmtBackend::Z3 => prove_fixed_point_mul_div_bounds_z3(spec),
+        SmtBackend::Cvc5 => Err(FixedPointProofError::UnsupportedBackend(SmtBackend::Cvc5)),
     }
 }
 
@@ -163,6 +262,139 @@ pub fn run_smt_latency_benchmark(iterations_per_strategy: usize) -> SmtLatencyBe
     }
 }
 
+fn validate_fixed_point_spec(spec: &FixedPointMulDivSpec) -> Result<(), FixedPointProofError> {
+    if spec.divisor_min == 0 {
+        return Err(FixedPointProofError::InvalidSpec(
+            "divisor_min must be greater than zero",
+        ));
+    }
+
+    if spec.divisor_max < spec.divisor_min {
+        return Err(FixedPointProofError::InvalidSpec(
+            "divisor_max must be greater than or equal to divisor_min",
+        ));
+    }
+
+    Ok(())
+}
+
+fn prove_fixed_point_mul_div_bounds_z3(
+    spec: &FixedPointMulDivSpec,
+) -> Result<FixedPointProofReport, FixedPointProofError> {
+    use z3::Config;
+
+    let cfg = Config::new();
+    let ctx = Context::new(&cfg);
+    let solver = Solver::new(&ctx);
+
+    let multiplicand = Int::new_const(&ctx, "multiplicand");
+    let multiplier = Int::new_const(&ctx, "multiplier");
+    let divisor = Int::new_const(&ctx, "divisor");
+
+    let zero = int_from_u128(&ctx, 0);
+    let max_u128 = int_from_u128(&ctx, u128::MAX);
+    let multiplicand_max = int_from_u128(&ctx, spec.multiplicand_max);
+    let multiplier_max = int_from_u128(&ctx, spec.multiplier_max);
+    let divisor_min = int_from_u128(&ctx, spec.divisor_min);
+    let divisor_max = int_from_u128(&ctx, spec.divisor_max);
+
+    solver.assert(&multiplicand.ge(&zero));
+    solver.assert(&multiplicand.le(&multiplicand_max));
+    solver.assert(&multiplier.ge(&zero));
+    solver.assert(&multiplier.le(&multiplier_max));
+    solver.assert(&divisor.ge(&divisor_min));
+    solver.assert(&divisor.le(&divisor_max));
+
+    let product = Int::mul(&ctx, &[&multiplicand, &multiplier]);
+    let quotient = product.div(&divisor);
+    let product_overflow = product.gt(&max_u128);
+
+    let mut checked_properties = vec!["intermediate multiplication fits in u128".to_string()];
+
+    let violation = if let Some(result_max) = spec.result_max {
+        checked_properties.push(format!("final quotient <= {}", result_max));
+        let quotient_overflow = quotient.gt(&int_from_u128(&ctx, result_max));
+        Bool::or(&ctx, &[&product_overflow, &quotient_overflow])
+    } else {
+        product_overflow
+    };
+
+    solver.assert(&violation);
+
+    match solver.check() {
+        SatResult::Unsat => Ok(FixedPointProofReport {
+            function_name: spec.function_name.clone(),
+            backend: SmtBackend::Z3,
+            proven_safe: true,
+            checked_properties,
+            message: "Z3 proved the fixed-point calculation stays within the configured bounds."
+                .to_string(),
+            counterexample: None,
+        }),
+        SatResult::Sat => {
+            let model = solver
+                .get_model()
+                .ok_or(FixedPointProofError::SolverFailure(
+                    "missing model for SAT result",
+                ))?;
+
+            let multiplicand_value =
+                model
+                    .eval(&multiplicand, true)
+                    .ok_or(FixedPointProofError::SolverFailure(
+                        "missing multiplicand witness",
+                    ))?;
+            let multiplier_value =
+                model
+                    .eval(&multiplier, true)
+                    .ok_or(FixedPointProofError::SolverFailure(
+                        "missing multiplier witness",
+                    ))?;
+            let divisor_value =
+                model
+                    .eval(&divisor, true)
+                    .ok_or(FixedPointProofError::SolverFailure(
+                        "missing divisor witness",
+                    ))?;
+            let product_value =
+                model
+                    .eval(&product, true)
+                    .ok_or(FixedPointProofError::SolverFailure(
+                        "missing product witness",
+                    ))?;
+            let quotient_value =
+                model
+                    .eval(&quotient, true)
+                    .ok_or(FixedPointProofError::SolverFailure(
+                        "missing quotient witness",
+                    ))?;
+
+            Ok(FixedPointProofReport {
+                function_name: spec.function_name.clone(),
+                backend: SmtBackend::Z3,
+                proven_safe: false,
+                checked_properties,
+                message: "Z3 found a counterexample within the configured input ranges."
+                    .to_string(),
+                counterexample: Some(FixedPointCounterexample {
+                    multiplicand: multiplicand_value.to_string(),
+                    multiplier: multiplier_value.to_string(),
+                    divisor: divisor_value.to_string(),
+                    intermediate_product: product_value.to_string(),
+                    quotient: quotient_value.to_string(),
+                }),
+            })
+        }
+        SatResult::Unknown => Err(FixedPointProofError::SolverFailure(
+            "Z3 returned unknown for the requested fixed-point proof",
+        )),
+    }
+}
+
+fn int_from_u128<'ctx>(ctx: &'ctx Context, value: u128) -> Int<'ctx> {
+    Int::from_str(ctx, &value.to_string()).expect("u128 literal should be a valid Z3 integer")
+}
+
 fn run_strategy(ctx: &Context, strategy: SmtProofStrategy) -> SatResult {
     let solver = Solver::new(ctx);
     let a = Int::new_const(ctx, "a");
@@ -193,4 +425,79 @@ fn run_strategy(ctx: &Context, strategy: SmtProofStrategy) -> SatResult {
     let sum = Int::add(ctx, &[&a, &b]);
     solver.assert(&sum.gt(&max_u64));
     solver.check()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prove_fixed_point_mul_div_bounds_reports_safe_ranges() {
+        let spec = FixedPointMulDivSpec {
+            function_name: "mul_div_floor".to_string(),
+            multiplicand_max: 1_000_000_000_000_000_000,
+            multiplier_max: 1_000_000_000_000_000_000,
+            divisor_min: 1,
+            divisor_max: 10_000_000,
+            result_max: Some(u128::MAX),
+        };
+
+        let report = prove_fixed_point_mul_div_bounds(&spec).unwrap();
+        assert!(report.proven_safe);
+        assert!(report.counterexample.is_none());
+    }
+
+    #[test]
+    fn prove_fixed_point_mul_div_bounds_reports_counterexample_for_unsafe_ranges() {
+        let spec = FixedPointMulDivSpec {
+            function_name: "mul_div_floor".to_string(),
+            multiplicand_max: u128::MAX,
+            multiplier_max: 2,
+            divisor_min: 1,
+            divisor_max: 1,
+            result_max: None,
+        };
+
+        let report = prove_fixed_point_mul_div_bounds(&spec).unwrap();
+        assert!(!report.proven_safe);
+        let witness = report.counterexample.unwrap();
+        assert!(!witness.intermediate_product.is_empty());
+    }
+
+    #[test]
+    fn prove_fixed_point_mul_div_bounds_rejects_zero_divisor() {
+        let spec = FixedPointMulDivSpec {
+            function_name: "invalid".to_string(),
+            multiplicand_max: 10,
+            multiplier_max: 10,
+            divisor_min: 0,
+            divisor_max: 10,
+            result_max: None,
+        };
+
+        let error = prove_fixed_point_mul_div_bounds(&spec).unwrap_err();
+        assert_eq!(
+            error,
+            FixedPointProofError::InvalidSpec("divisor_min must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn prove_fixed_point_mul_div_bounds_supports_backend_abstraction() {
+        let spec = FixedPointMulDivSpec {
+            function_name: "mul_div_floor".to_string(),
+            multiplicand_max: 10,
+            multiplier_max: 10,
+            divisor_min: 1,
+            divisor_max: 10,
+            result_max: None,
+        };
+
+        let error =
+            prove_fixed_point_mul_div_bounds_with_backend(SmtBackend::Cvc5, &spec).unwrap_err();
+        assert_eq!(
+            error,
+            FixedPointProofError::UnsupportedBackend(SmtBackend::Cvc5)
+        );
+    }
 }
