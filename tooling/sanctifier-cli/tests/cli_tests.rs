@@ -142,13 +142,14 @@ fn test_init_overwrites_when_force_is_set() {
 fn test_json_output_validates_against_schema() {
     // Locate the schema relative to the workspace root (two levels up from
     // this package's Cargo.toml directory).
-    let schema_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../schemas/analysis-output.json");
+    let schema_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/analysis-output.json");
     let schema_text = fs::read_to_string(&schema_path)
         .expect("schemas/analysis-output.json should exist at the workspace root");
     let schema_value: serde_json::Value =
         serde_json::from_str(&schema_text).expect("schema file should be valid JSON");
-    let compiled = JSONSchema::compile(&schema_value).expect("schema should compile without errors");
+    let compiled =
+        JSONSchema::compile(&schema_value).expect("schema should compile without errors");
 
     let fixture_path = env::current_dir()
         .unwrap()

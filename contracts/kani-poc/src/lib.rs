@@ -369,7 +369,10 @@ mod verification {
         let Ok((na, nb)) = transfer_pure(a, b, amount) else {
             panic!("unexpected");
         };
-        assert!(na + nb == total, "transfer must preserve sum(a,b) == total_supply");
+        assert!(
+            na + nb == total,
+            "transfer must preserve sum(a,b) == total_supply"
+        );
     }
 
     #[kani::proof]
@@ -408,7 +411,10 @@ mod verification {
             panic!("unexpected");
         };
         assert!(new_a == new_a2);
-        assert!(new_total == new_a + b, "after burn, total_supply == sum of balances");
+        assert!(
+            new_total == new_a + b,
+            "after burn, total_supply == sum of balances"
+        );
     }
 
     #[kani::proof]
@@ -438,7 +444,10 @@ mod verification {
         let Ok((new_total, new_a)) = mint_pure_with_total_supply(total, a, amount) else {
             panic!("unexpected");
         };
-        assert!(new_total == new_a + b, "mint must increase total_supply and balance coherently");
+        assert!(
+            new_total == new_a + b,
+            "mint must increase total_supply and balance coherently"
+        );
     }
 
     /// **Master property**: from any state with `total_supply == a + b`, one step of
