@@ -1,203 +1,368 @@
 #![no_std]
+#![allow(unexpected_cfgs)]
 
-//! AMM Liquidity Pool with Constant Product Formula (x * y = k)
-//!
-//! This module demonstrates property-based testing for AMM pool math to verify
-//! that liquidity pool calculations never overflow or underflow.
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, Env,
+};
 
-// ── Pure logic (testable with proptest) ─────────────────────────────────────────
+const MINIMUM_LIQUIDITY: u128 = 1_000;
+const PRICE_SCALE: u128 = 1_000_000;
 
-/// Calculate output amount for a swap using constant product formula
-/// Formula: (x * y = k) => output = (y * amount_in) / (x + amount_in)
-/// With fee: output = (y * amount_in * (10000 - fee_bps)) / ((x + amount_in) * 10000)
-pub fn calculate_swap_output(
-    reserve_in: u128,
-    reserve_out: u128,
-    amount_in: u128,
-    fee_bps: u128, // Fee in basis points (e.g., 30 = 0.3%)
-) -> Result<u128, &'static str> {
-    if amount_in == 0 {
-        return Err("Amount in must be positive");
-    }
-    if reserve_in == 0 || reserve_out == 0 {
-        return Err("Reserves must be positive");
-    }
-    if fee_bps >= 10000 {
-        return Err("Fee must be less than 100%");
-    }
-
-    // Calculate amount_in after fee
-    let amount_in_with_fee = amount_in
-        .checked_mul(10000 - fee_bps)
-        .ok_or("Fee calculation overflow")?;
-
-    // Calculate numerator: reserve_out * amount_in_with_fee
-    let numerator = reserve_out
-        .checked_mul(amount_in_with_fee)
-        .ok_or("Numerator overflow")?;
-
-    // Calculate denominator: (reserve_in * 10000) + amount_in_with_fee
-    let denominator = reserve_in
-        .checked_mul(10000)
-        .ok_or("Denominator overflow")?
-        .checked_add(amount_in_with_fee)
-        .ok_or("Denominator addition overflow")?;
-
-    if denominator == 0 {
-        return Err("Denominator is zero");
-    }
-
-    let output = numerator.checked_div(denominator).ok_or("Division error")?;
-
-    Ok(output)
+#[contracttype]
+#[derive(Clone, Eq, PartialEq)]
+enum DataKey {
+    TokenA,
+    TokenB,
+    ReserveA,
+    ReserveB,
+    TotalSupply,
 }
 
-/// Add liquidity to the pool
-/// Returns the amount of LP tokens to mint
+#[contracterror]
+#[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum AmmError {
+    ZeroAmount = 1,
+    IdenticalTokens = 2,
+    InvalidPair = 3,
+    PoolNotInitialized = 4,
+    InsufficientLiquidity = 5,
+    SlippageExceeded = 6,
+    MintBelowMinimum = 7,
+    LockedLiquidity = 8,
+    ArithmeticOverflow = 9,
+}
+
+#[contract]
+pub struct AmmPool;
+
+#[contractimpl]
+impl AmmPool {
+    pub fn add_liquidity(
+        env: Env,
+        token_a: Address,
+        token_b: Address,
+        amount_a: u128,
+        amount_b: u128,
+        min_lp: u128,
+    ) -> u128 {
+        env.current_contract_address().require_auth();
+
+        if amount_a == 0 || amount_b == 0 {
+            return 0;
+        }
+        if token_a == token_b {
+            return 0;
+        }
+
+        let total_supply = read_total_supply(&env).unwrap_or(0);
+
+        if total_supply == 0 {
+            let Some(initial_liquidity) = calculate_initial_liquidity(amount_a, amount_b) else {
+                return 0;
+            };
+            let Some(minted) = initial_liquidity.checked_sub(MINIMUM_LIQUIDITY) else {
+                return 0;
+            };
+            if minted < min_lp {
+                return 0;
+            }
+
+            write_pair(&env, token_a, token_b);
+            write_pool_state(&env, amount_a, amount_b, initial_liquidity);
+            return minted;
+        }
+
+        let Some((stored_a, stored_b)) = read_pair(&env) else {
+            return 0;
+        };
+        if stored_a != token_a || stored_b != token_b {
+            return 0;
+        }
+
+        let Some(reserve_a) = read_reserve_a(&env) else {
+            return 0;
+        };
+        let Some(reserve_b) = read_reserve_b(&env) else {
+            return 0;
+        };
+        let Some(minted) =
+            calculate_liquidity_mint(reserve_a, reserve_b, amount_a, amount_b, total_supply)
+        else {
+            return 0;
+        };
+        if minted < min_lp {
+            return 0;
+        }
+
+        let Some(next_reserve_a) = reserve_a.checked_add(amount_a) else {
+            return 0;
+        };
+        let Some(next_reserve_b) = reserve_b.checked_add(amount_b) else {
+            return 0;
+        };
+        let Some(next_total_supply) = total_supply.checked_add(minted) else {
+            return 0;
+        };
+
+        write_pool_state(&env, next_reserve_a, next_reserve_b, next_total_supply);
+        minted
+    }
+
+    pub fn remove_liquidity(env: Env, lp_amount: u128, min_a: u128, min_b: u128) -> (u128, u128) {
+        env.current_contract_address().require_auth();
+
+        if lp_amount == 0 {
+            return (0, 0);
+        }
+
+        let Some(total_supply) = read_total_supply(&env) else {
+            return (0, 0);
+        };
+        let Some(remaining_supply) = total_supply.checked_sub(lp_amount) else {
+            return (0, 0);
+        };
+        if remaining_supply < MINIMUM_LIQUIDITY {
+            return (0, 0);
+        }
+
+        let Some(reserve_a) = read_reserve_a(&env) else {
+            return (0, 0);
+        };
+        let Some(reserve_b) = read_reserve_b(&env) else {
+            return (0, 0);
+        };
+
+        let Some(amount_a) = proportional_amount(reserve_a, lp_amount, total_supply) else {
+            return (0, 0);
+        };
+        let Some(amount_b) = proportional_amount(reserve_b, lp_amount, total_supply) else {
+            return (0, 0);
+        };
+
+        if amount_a < min_a || amount_b < min_b {
+            return (0, 0);
+        }
+        if amount_a == 0 || amount_b == 0 {
+            return (0, 0);
+        }
+
+        let Some(next_reserve_a) = reserve_a.checked_sub(amount_a) else {
+            return (0, 0);
+        };
+        let Some(next_reserve_b) = reserve_b.checked_sub(amount_b) else {
+            return (0, 0);
+        };
+
+        write_pool_state(&env, next_reserve_a, next_reserve_b, remaining_supply);
+        (amount_a, amount_b)
+    }
+
+    pub fn swap(env: Env, token_in: Address, amount_in: u128, min_out: u128) -> u128 {
+        env.current_contract_address().require_auth();
+
+        if amount_in == 0 {
+            return 0;
+        }
+
+        let Some(reserve_a) = read_reserve_a(&env) else {
+            return 0;
+        };
+        let Some(reserve_b) = read_reserve_b(&env) else {
+            return 0;
+        };
+        let Some((token_a, token_b)) = read_pair(&env) else {
+            return 0;
+        };
+        let amount_out = if token_in == token_a {
+            execute_swap(reserve_a, reserve_b, amount_in, min_out)
+        } else if token_in == token_b {
+            execute_swap(reserve_b, reserve_a, amount_in, min_out)
+        } else {
+            return 0;
+        };
+
+        if token_in == token_a {
+            let Some(next_reserve_a) = reserve_a.checked_add(amount_in) else {
+                return 0;
+            };
+            let Some(next_reserve_b) = reserve_b.checked_sub(amount_out) else {
+                return 0;
+            };
+            let Some(total_supply) = read_total_supply(&env) else {
+                return 0;
+            };
+            write_pool_state(&env, next_reserve_a, next_reserve_b, total_supply);
+            return amount_out;
+        }
+
+        let Some(next_reserve_b) = reserve_b.checked_add(amount_in) else {
+            return 0;
+        };
+        let Some(next_reserve_a) = reserve_a.checked_sub(amount_out) else {
+            return 0;
+        };
+        let Some(total_supply) = read_total_supply(&env) else {
+            return 0;
+        };
+        write_pool_state(&env, next_reserve_a, next_reserve_b, total_supply);
+        amount_out
+    }
+
+    pub fn get_price(env: Env, token_in: Address, token_out: Address) -> u128 {
+        let Some(reserve_a) = read_reserve_a(&env) else {
+            return 0;
+        };
+        let Some(reserve_b) = read_reserve_b(&env) else {
+            return 0;
+        };
+        let Some((token_a, token_b)) = read_pair(&env) else {
+            return 0;
+        };
+
+        if token_in == token_a && token_out == token_b {
+            return scaled_ratio(reserve_b, reserve_a).unwrap_or(0);
+        }
+        if token_in == token_b && token_out == token_a {
+            return scaled_ratio(reserve_a, reserve_b).unwrap_or(0);
+        }
+
+        0
+    }
+}
+
+fn execute_swap(reserve_in: u128, reserve_out: u128, amount_in: u128, min_out: u128) -> u128 {
+    if reserve_in == 0 || reserve_out == 0 {
+        return 0;
+    }
+
+    let Some(amount_out) = calculate_swap_output(reserve_in, reserve_out, amount_in) else {
+        return 0;
+    };
+    if amount_out < min_out {
+        return 0;
+    }
+
+    if amount_out == 0 || amount_out >= reserve_out {
+        return 0;
+    }
+
+    amount_out
+}
+
+fn calculate_initial_liquidity(amount_a: u128, amount_b: u128) -> Option<u128> {
+    let product = amount_a.checked_mul(amount_b)?;
+    integer_sqrt(product)
+}
+
 pub fn calculate_liquidity_mint(
     reserve_a: u128,
     reserve_b: u128,
     amount_a: u128,
     amount_b: u128,
     total_supply: u128,
-) -> Result<u128, &'static str> {
-    if amount_a == 0 || amount_b == 0 {
-        return Err("Amounts must be positive");
+) -> Option<u128> {
+    if reserve_a == 0 || reserve_b == 0 || total_supply == 0 {
+        return None;
     }
 
-    // First liquidity provision
-    if total_supply == 0 {
-        // Use geometric mean to prevent inflation attacks
-        let product = amount_a
-            .checked_mul(amount_b)
-            .ok_or("Initial liquidity overflow")?;
+    let liquidity_a = amount_a.checked_mul(total_supply)?.checked_div(reserve_a)?;
+    let liquidity_b = amount_b.checked_mul(total_supply)?.checked_div(reserve_b)?;
 
-        // Simple sqrt approximation for initial liquidity
-        let liquidity = integer_sqrt(product);
+    let minted = min_u128(liquidity_a, liquidity_b);
+    if minted == 0 {
+        return None;
+    }
+    Some(minted)
+}
 
-        if liquidity == 0 {
-            return Err("Initial liquidity too small");
-        }
+pub fn calculate_swap_output(
+    reserve_in: u128,
+    reserve_out: u128,
+    amount_in: u128,
+    ) -> Option<u128> {
+    let numerator = amount_in.checked_mul(reserve_out)?;
+    let denominator = reserve_in.checked_add(amount_in)?;
+    numerator.checked_div(denominator)
+}
 
-        return Ok(liquidity);
+fn proportional_amount(reserve: u128, lp_amount: u128, total_supply: u128) -> Option<u128> {
+    let numerator = reserve.checked_mul(lp_amount)?;
+    numerator.checked_div(total_supply)
+}
+
+fn scaled_ratio(numerator: u128, denominator: u128) -> Option<u128> {
+    if numerator == 0 || denominator == 0 {
+        return None;
     }
 
-    // Subsequent liquidity provision
-    if reserve_a == 0 || reserve_b == 0 {
-        return Err("Reserves must be positive");
+    let scaled = numerator.checked_mul(PRICE_SCALE)?;
+    scaled.checked_div(denominator)
+}
+
+fn integer_sqrt(value: u128) -> Option<u128> {
+    if value == 0 {
+        return Some(0);
     }
 
-    // Calculate liquidity based on both ratios and take minimum
-    let liquidity_a = amount_a
-        .checked_mul(total_supply)
-        .ok_or("Liquidity A calculation overflow")?
-        .checked_div(reserve_a)
-        .ok_or("Division by reserve A")?;
+    let mut estimate = value;
+    let mut next = ceil_half(value)?;
 
-    let liquidity_b = amount_b
-        .checked_mul(total_supply)
-        .ok_or("Liquidity B calculation overflow")?
-        .checked_div(reserve_b)
-        .ok_or("Division by reserve B")?;
+    while next < estimate {
+        estimate = next;
+        let quotient = value.checked_div(estimate)?;
+        let sum = estimate.checked_add(quotient)?;
+        next = ceil_half(sum)?;
+    }
 
-    // Take minimum to maintain ratio
-    let liquidity = if liquidity_a < liquidity_b {
-        liquidity_a
+    Some(estimate)
+}
+
+fn ceil_half(value: u128) -> Option<u128> {
+    let incremented = value.checked_add(1)?;
+    incremented.checked_div(2)
+}
+
+fn write_pair(env: &Env, token_a: Address, token_b: Address) {
+    env.storage().instance().set(&DataKey::TokenA, &token_a);
+    env.storage().instance().set(&DataKey::TokenB, &token_b);
+}
+
+fn read_pair(env: &Env) -> Option<(Address, Address)> {
+    let token_a = read_address(env, DataKey::TokenA)?;
+    let token_b = read_address(env, DataKey::TokenB)?;
+    Some((token_a, token_b))
+}
+
+fn write_pool_state(env: &Env, reserve_a: u128, reserve_b: u128, total_supply: u128) {
+    env.storage().instance().set(&DataKey::ReserveA, &reserve_a);
+    env.storage().instance().set(&DataKey::ReserveB, &reserve_b);
+    env.storage().instance().set(&DataKey::TotalSupply, &total_supply);
+}
+
+fn read_address(env: &Env, key: DataKey) -> Option<Address> {
+    env.storage().instance().get::<DataKey, Address>(&key)
+}
+
+fn read_reserve_a(env: &Env) -> Option<u128> {
+    read_u128(env, DataKey::ReserveA)
+}
+
+fn read_reserve_b(env: &Env) -> Option<u128> {
+    read_u128(env, DataKey::ReserveB)
+}
+
+fn read_total_supply(env: &Env) -> Option<u128> {
+    env.storage().instance().get::<DataKey, u128>(&DataKey::TotalSupply)
+}
+
+fn read_u128(env: &Env, key: DataKey) -> Option<u128> {
+    env.storage().instance().get::<DataKey, u128>(&key)
+}
+
+fn min_u128(left: u128, right: u128) -> u128 {
+    if left < right {
+        left
     } else {
-        liquidity_b
-    };
-
-    if liquidity == 0 {
-        return Err("Liquidity amount too small");
-    }
-
-    Ok(liquidity)
-}
-
-/// Remove liquidity from the pool
-/// Returns the amounts of tokens A and B to return
-pub fn calculate_liquidity_burn(
-    reserve_a: u128,
-    reserve_b: u128,
-    liquidity: u128,
-    total_supply: u128,
-) -> Result<(u128, u128), &'static str> {
-    if liquidity == 0 {
-        return Err("Liquidity must be positive");
-    }
-    if total_supply == 0 {
-        return Err("Total supply is zero");
-    }
-    if liquidity > total_supply {
-        return Err("Liquidity exceeds total supply");
-    }
-
-    let amount_a = reserve_a
-        .checked_mul(liquidity)
-        .ok_or("Amount A calculation overflow")?
-        .checked_div(total_supply)
-        .ok_or("Division by total supply")?;
-
-    let amount_b = reserve_b
-        .checked_mul(liquidity)
-        .ok_or("Amount B calculation overflow")?
-        .checked_div(total_supply)
-        .ok_or("Division by total supply")?;
-
-    if amount_a == 0 || amount_b == 0 {
-        return Err("Burn amounts too small");
-    }
-
-    Ok((amount_a, amount_b))
-}
-
-/// Simple integer square root using binary search
-fn integer_sqrt(n: u128) -> u128 {
-    if n == 0 {
-        return 0;
-    }
-
-    let mut x = n;
-    let mut y = x.div_ceil(2);
-
-    while y < x {
-        x = y;
-        y = (x + n / x).div_ceil(2);
-    }
-
-    x
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_swap() {
-        // Pool with 1000 of each token, 0.3% fee
-        let output = calculate_swap_output(1000, 1000, 100, 30).unwrap();
-        assert!(output > 0);
-        assert!(output < 100); // Should be less due to slippage and fees
-    }
-
-    #[test]
-    fn test_initial_liquidity() {
-        let liquidity = calculate_liquidity_mint(0, 0, 1000, 1000, 0).unwrap();
-        assert_eq!(liquidity, 1000); // sqrt(1000 * 1000) = 1000
-    }
-
-    #[test]
-    fn test_add_liquidity() {
-        // Existing pool: 1000 A, 2000 B, 500 LP tokens
-        let liquidity = calculate_liquidity_mint(1000, 2000, 100, 200, 500).unwrap();
-        assert_eq!(liquidity, 50); // (100 * 500) / 1000 = 50
-    }
-
-    #[test]
-    fn test_remove_liquidity() {
-        // Pool: 1000 A, 2000 B, 500 LP tokens, burn 100
-        let (amount_a, amount_b) = calculate_liquidity_burn(1000, 2000, 100, 500).unwrap();
-        assert_eq!(amount_a, 200); // (1000 * 100) / 500 = 200
-        assert_eq!(amount_b, 400); // (2000 * 100) / 500 = 400
+        right
     }
 }

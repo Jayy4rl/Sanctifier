@@ -1,117 +1,111 @@
 #![cfg(test)]
+#![allow(unexpected_cfgs)]
 
-//! Integration tests for the Runtime Guard Wrapper contract
-//!
-//! These tests validate:
-//! - Wrapper initialization
-//! - Guard execution with pre/post checks
-//! - Storage invariant validation
-//! - Execution metrics collection
-//! - Continuous validation loop behavior
+use runtime_guard_wrapper::RuntimeGuardWrapper;
+use soroban_sdk::{
+    contract, contractimpl, testutils::Address as _, vec, Address, Env, IntoVal, Symbol, Val,
+    Vec,
+};
 
-#[cfg(test)]
-mod tests {
-    use soroban_sdk::{vec, Address, Env, Symbol};
+#[contract]
+pub struct RuntimeGuardWrapperHarness;
 
-    /// Test wrapper initialization
-    #[test]
-    fn test_wrapper_initialization() {
-        let env = Env::default();
-        let contract_id = env.current_contract_address();
-
-        // Create a dummy wrapped contract address
-        let wrapped_contract = Address::from_contract_id(&env, &[0; 32]);
-
-        // Initialize wrapper would be called here
-        // After initialization:
-        // - Wrapped contract address should be stored
-        // - Guard configuration should be set
-        // - Call log should be initialized
-        // - Metrics storage should be initialized
-
-        assert!(!contract_id.to_string().is_empty());
+#[contractimpl]
+impl RuntimeGuardWrapperHarness {
+    pub fn init(env: Env, wrapped_contract: Address) {
+        RuntimeGuardWrapper::init(env, wrapped_contract)
     }
 
-    /// Test pre-execution guards
-    #[test]
-    fn test_pre_execution_guards() {
-        let env = Env::default();
-
-        // Test that wrapped contract must be set
-        // Test that storage integrity is validated
-
-        // Should fail if wrapped contract not initialized
-        // Should succeed if wrapped contract is properly set
+    pub fn get_wrapped_contract(env: Env) -> Address {
+        RuntimeGuardWrapper::get_wrapped_contract(env)
     }
 
-    /// Test post-execution guards
-    #[test]
-    fn test_post_execution_guards() {
-        let env = Env::default();
-
-        // Test that storage invariants are verified
-        // Test that guard check events are emitted
-        // Test that execution count is incremented
+    pub fn execute_guarded(env: Env, function_name: Symbol, args: Vec<Val>) -> Result<Val, soroban_sdk::Error> {
+        RuntimeGuardWrapper::execute_guarded(env, function_name, args)
     }
 
-    /// Test execution logging
-    #[test]
-    fn test_execution_logging() {
-        let env = Env::default();
-
-        // Test that function calls are logged
-        // Test that log maintains audit trail
-        // Test that log doesn't grow unbounded (circular buffer)
+    pub fn get_stats(env: Env) -> (u32, u32, u32) {
+        RuntimeGuardWrapper::get_stats(env)
     }
 
-    /// Test execution metrics
-    #[test]
-    fn test_execution_metrics() {
-        let env = Env::default();
+    pub fn health_check(env: Env) -> bool {
+        RuntimeGuardWrapper::health_check(env)
+    }
+}
 
-        // Test that execution metrics are recorded
-        // Test that metrics include: call_hash, success, timestamp, gas_used
-        // Test that metrics don't grow unbounded
+fn setup(env: &Env) -> (RuntimeGuardWrapperHarnessClient<'_>, Address) {
+    let contract_id = env.register_contract(None, RuntimeGuardWrapperHarness);
+    let wrapped = Address::generate(&env);
+    let client = RuntimeGuardWrapperHarnessClient::new(&env, &contract_id);
+    client.init(&wrapped);
+    (client, wrapped)
+}
+
+#[test]
+fn execute_guarded_rejects_missing_function_name() {
+    let env = Env::default();
+    let (client, _) = setup(&env);
+    let result = client.try_execute_guarded(&Symbol::new(&env, "missing"), &vec![&env]);
+
+    assert!(result.is_err());
+    assert_eq!(client.get_stats(), (0, 0, 0));
+}
+
+#[test]
+fn execute_guarded_rejects_argument_count_mismatch() {
+    let env = Env::default();
+    let (client, _) = setup(&env);
+    let args = vec![&env, 7u32.into_val(&env)];
+    let result = client.try_execute_guarded(&Symbol::new(&env, "ping"), &args);
+
+    assert!(result.is_err());
+    assert_eq!(client.get_stats(), (0, 0, 0));
+}
+
+#[test]
+fn init_called_twice_is_idempotent() {
+    let env = Env::default();
+    let (client, wrapped) = setup(&env);
+    let replacement = Address::generate(&env);
+
+    client.init(&replacement);
+
+    assert_eq!(client.get_wrapped_contract(), wrapped);
+    assert_eq!(client.get_stats(), (0, 0, 0));
+}
+
+#[test]
+fn health_check_fails_after_storage_budget_is_exhausted() {
+    let env = Env::default();
+    let (client, _) = setup(&env);
+
+    let mut index = 0u32;
+    while index < 64 {
+        let _ = client.execute_guarded(&Symbol::new(&env, "ping"), &vec![&env]);
+        index = index.saturating_add(1);
     }
 
-    /// Test health check
-    #[test]
-    fn test_health_check() {
-        let env = Env::default();
+    assert!(!client.health_check());
+}
 
-        // Test that health check verifies wrapped contract is set
-        // Test that health check verifies metrics storage is accessible
-        // Should return true if all systems operational
-    }
+#[test]
+fn get_stats_tracks_successes_and_failures() {
+    let env = Env::default();
+    let (client, _) = setup(&env);
+    let empty = vec![&env];
 
-    /// Test guard event emission
-    #[test]
-    fn test_guard_event_emission() {
-        let env = Env::default();
+    let _ = client.execute_guarded(&Symbol::new(&env, "ping"), &empty);
+    let _ = client.execute_guarded(&Symbol::new(&env, "echo"), &vec![&env, 9u32.into_val(&env)]);
+    let _ = client.execute_guarded(
+        &Symbol::new(&env, "sum"),
+        &vec![&env, 2u32.into_val(&env), 3u32.into_val(&env)],
+    );
+    let missing = client.try_execute_guarded(&Symbol::new(&env, "missing"), &empty);
+    let mismatch =
+        client.try_execute_guarded(&Symbol::new(&env, "ping"), &vec![&env, 1u32.into_val(&env)]);
 
-        // Test that guard events are properly emitted
-        // Test event names and statuses
-        // Test that events can be monitored for validation
-    }
+    assert!(missing.is_err());
+    assert!(mismatch.is_err());
 
-    /// Test storage integrity validation
-    #[test]
-    fn test_storage_integrity_validation() {
-        let env = Env::default();
-
-        // Test that critical storage keys are validated
-        // Test that corrupted storage is detected
-        // Test that validation prevents execution if storage invalid
-    }
-
-    /// Test stats retrieval
-    #[test]
-    fn test_get_stats() {
-        let env = Env::default();
-
-        // Test that stats can retrieve:
-        // - Invariants checked count
-        // - Call log entries count
-        // - Guard failures count
-    }
+    assert_eq!(client.get_stats(), (3, 3, 0));
 }
