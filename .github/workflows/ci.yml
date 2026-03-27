@@ -39,10 +39,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install Z3
-        uses: z3prover/setup-z3@v1
-        with:
-          z3-version: 4.12.2
+      - name: Install Z3 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Install Z3 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install z3
+
+      - name: Install Z3 (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install z3 -y
 
       - name: Install system dependencies (Linux only)
         if: runner.os == 'Linux'
