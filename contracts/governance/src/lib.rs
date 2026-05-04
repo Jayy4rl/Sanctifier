@@ -4,6 +4,18 @@
 //! quorum, threshold, voting delay, and voting period.  Proposals that pass
 //! are queued in a [`TimelockController`](crate) before execution.
 //!
+//! ## 🔐 Security Disclaimer
+//!
+//! **Contract:** Governance Contract  
+//! **Security Level:** Critical  
+//! **Audit Required:** true  
+//!
+//! ⚠️  SECURITY WARNING: This contract has not been audited. Use at your own risk. Deploy only after thorough testing and security review. CRITICAL: Formal verification required.
+//!
+//! **Testing Requirements:** Requirements: Formal verification, comprehensive audit, stress testing, security review
+//!
+//! Use this contract only after understanding the risks and implementing appropriate security measures.
+//!
 //! ## Public Interface (ABI)
 //!
 //! | Function | Description |
@@ -18,12 +30,34 @@
 //! ## Error Codes
 //!
 //! See [`Error`] for the full list of contract error variants.
+//!
+//! ## Security Considerations
+//!
+//! - This contract controls critical governance decisions that can affect the entire protocol
+//! - Voting parameters (quorum, threshold, delay) must be carefully configured
+//! - Token-weighted voting can be subject to whale attacks - consider implementing safeguards
+//! - Timelock duration should be sufficient for community review and emergency response
+//! - Proposal execution should be monitored for suspicious patterns
+//! - Consider implementing veto mechanisms for emergency situations
 #![no_std]
 
+#[cfg(feature = "security-disclaimers")]
+use security_disclaimers::{DisclaimerCategory, SecurityLevel};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, xdr::ToXdr,
     Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
 };
+
+#[cfg(not(feature = "security-disclaimers"))]
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum DisclaimerCategory {
+    Audit = 0,
+    Usage = 1,
+    Upgrade = 2,
+    Emergency = 3,
+}
 
 #[cfg(test)]
 mod test;
@@ -112,6 +146,39 @@ pub struct GovernorContract;
 
 #[contractimpl]
 impl GovernorContract {
+    /// Get security disclaimer for this contract
+    pub fn get_security_disclaimer(env: Env, _category: DisclaimerCategory) -> soroban_sdk::String {
+        #[cfg(feature = "security-disclaimers")]
+        {
+            security_disclaimers::get_disclaimer(env.clone(), SecurityLevel::Critical, _category)
+        }
+        #[cfg(not(feature = "security-disclaimers"))]
+        {
+            soroban_sdk::String::from_str(
+                &env,
+                "Security disclaimer functionality not available in this build.",
+            )
+        }
+    }
+
+    /// Validate security configuration
+    pub fn validate_security_config(_env: Env, has_admin: bool, has_upgrade: bool) -> bool {
+        #[cfg(feature = "security-disclaimers")]
+        {
+            security_disclaimers::validate_security_config(
+                _env,
+                SecurityLevel::Critical,
+                has_admin,
+                has_upgrade,
+            )
+        }
+        #[cfg(not(feature = "security-disclaimers"))]
+        {
+            // Default validation for builds without security-disclaimers
+            has_admin && has_upgrade
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn init(
         env: Env,

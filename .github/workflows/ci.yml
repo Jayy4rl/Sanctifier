@@ -28,6 +28,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install WASM target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Cache cargo registry & build artifacts
         uses: actions/cache@v4
         with:
@@ -67,7 +70,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

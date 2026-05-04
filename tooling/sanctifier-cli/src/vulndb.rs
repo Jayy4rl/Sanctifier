@@ -515,8 +515,8 @@ fn second() {
             err_chain.contains("urgent"),
             "expected error chain to contain 'urgent', got: {err_chain}"
         );
-        assert!(err.to_string().contains("vulnerabilities[0].severity"));
-        assert!(err.to_string().contains("urgent"));
+        assert!(err_chain.contains("vulnerabilities[0].severity"));
+        assert!(err_chain.contains("urgent"));
     }
 
     #[test]

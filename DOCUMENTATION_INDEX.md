@@ -92,6 +92,15 @@
 - Machine-readable JSON at `docs/generated/contract-interfaces.json`
 - Regenerate with `make contract-docs`; CI enforces freshness via `make contract-docs-check`
 
+### Contract Security Disclaimers
+**[docs/contract-security-disclaimers.md](docs/contract-security-disclaimers.md)** - Security disclaimer framework for contracts
+- Security level classification (Critical, High, Medium, Low)
+- Disclaimer categories (Audit, Usage, Upgrade, Emergency)
+- Implementation guide and usage examples
+- Testing and validation procedures
+- Security best practices and monitoring
+- Integration examples for contract developers
+
 ### Runtime Guard Wrapper Contract
 
 **[contracts/runtime-guard-wrapper/README.md](contracts/runtime-guard-wrapper/README.md)**

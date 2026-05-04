@@ -9,6 +9,8 @@ fn has_contracttype(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
+/// Check if a function name indicates an upgrade or admin operation.
+pub fn is_upgrade_or_admin_fn(name: &str) -> bool {
 pub(crate) fn is_upgrade_or_admin_fn(name: &str) -> bool {
     let lower = name.to_lowercase();
     matches!(
@@ -23,6 +25,8 @@ pub(crate) fn is_upgrade_or_admin_fn(name: &str) -> bool {
     ) || (lower.contains("upgrade") && (lower.contains("contract") || lower.contains("wasm")))
 }
 
+/// Check if a function name indicates an initialization operation.
+pub fn is_init_fn(name: &str) -> bool {
 pub(crate) fn is_init_fn(name: &str) -> bool {
     let lower = name.to_lowercase();
     lower == "initialize" || lower == "init" || lower == "initialise"
@@ -39,15 +43,11 @@ pub fn analyze_upgrade_patterns(source: &str) -> UpgradeReport {
 
     for item in &file.items {
         match item {
-            syn::Item::Struct(s) => {
-                if has_contracttype(&s.attrs) {
-                    report.storage_types.push(s.ident.to_string());
-                }
+            syn::Item::Struct(s) if has_contracttype(&s.attrs) => {
+                report.storage_types.push(s.ident.to_string());
             }
-            syn::Item::Enum(e) => {
-                if has_contracttype(&e.attrs) {
-                    report.storage_types.push(e.ident.to_string());
-                }
+            syn::Item::Enum(e) if has_contracttype(&e.attrs) => {
+                report.storage_types.push(e.ident.to_string());
             }
             syn::Item::Impl(i) => {
                 for impl_item in &i.items {

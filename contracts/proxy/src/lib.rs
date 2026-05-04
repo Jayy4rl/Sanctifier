@@ -7,6 +7,18 @@
 //! This keeps the proxy minimal and ensures that only the implementation
 //! can authorise its own replacement.
 //!
+//! ## 🔐 Security Disclaimer
+//!
+//! **Contract:** UUPS Proxy  
+//! **Security Level:** High  
+//! **Audit Required:** true  
+//!
+//! ⚠️  SECURITY WARNING: This contract has not been audited. Use at your own risk. Deploy only after thorough testing and security review. HIGH: Professional audit strongly recommended.
+//!
+//! **Testing Requirements:** Requirements: Professional audit, integration testing, security review
+//!
+//! Use this contract only after understanding the risks and implementing appropriate security measures.
+//!
 //! ## Design
 //! ```text
 //! ┌──────────────┐   delegate calls   ┌──────────────────┐
@@ -36,10 +48,32 @@
 //! | `PEND_ADMIN`   | `Address` | Instance | Pending admin (two-step transfer)   |
 //! | `VERSION`      | `u32`     | Instance | Upgrade counter                     |
 //! | `IMPL_HASH`    | `Bytes`   | Instance | SHA-256 hash of last deployed WASM  |
+//!
+//! ## Security Considerations
+//!
+//! - Upgradeability introduces significant security risks - only use when necessary
+//! - Admin address must be secure and preferably a multi-sig wallet
+//! - Always verify upgrade logic and test thoroughly before deployment
+//! - Monitor upgrade events for suspicious activity
+//! - Consider implementing time delays for critical upgrades
+//! - Version management must prevent malicious rollbacks
 
+#[cfg(feature = "security-disclaimers")]
+use security_disclaimers::{DisclaimerCategory, SecurityLevel};
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol,
 };
+
+#[cfg(not(feature = "security-disclaimers"))]
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum DisclaimerCategory {
+    Audit = 0,
+    Usage = 1,
+    Upgrade = 2,
+    Emergency = 3,
+}
 
 // ── Storage keys ────────────────────────────────────────────────────────────────
 
@@ -74,6 +108,39 @@ pub struct UupsProxy;
 
 #[contractimpl]
 impl UupsProxy {
+    /// Get security disclaimer for this contract
+    pub fn get_security_disclaimer(env: Env, _category: DisclaimerCategory) -> soroban_sdk::String {
+        #[cfg(feature = "security-disclaimers")]
+        {
+            security_disclaimers::get_disclaimer(env.clone(), SecurityLevel::High, _category)
+        }
+        #[cfg(not(feature = "security-disclaimers"))]
+        {
+            soroban_sdk::String::from_str(
+                &env,
+                "Security disclaimer functionality not available in this build.",
+            )
+        }
+    }
+
+    /// Validate security configuration
+    pub fn validate_security_config(_env: Env, has_admin: bool, _has_upgrade: bool) -> bool {
+        #[cfg(feature = "security-disclaimers")]
+        {
+            security_disclaimers::validate_security_config(
+                _env,
+                SecurityLevel::High,
+                has_admin,
+                _has_upgrade,
+            )
+        }
+        #[cfg(not(feature = "security-disclaimers"))]
+        {
+            // Default validation for builds without security-disclaimers
+            has_admin
+        }
+    }
+
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
     /// Initialise the proxy. Can only be called once.

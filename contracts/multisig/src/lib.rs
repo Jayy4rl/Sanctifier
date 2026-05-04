@@ -3,6 +3,18 @@
 //! M-of-N multisignature wallet on Soroban.  Signers propose, approve, and
 //! execute arbitrary cross-contract calls once the approval threshold is met.
 //!
+//! ## 🔐 Security Disclaimer
+//!
+//! **Contract:** Multisig Wallet  
+//! **Security Level:** Critical  
+//! **Audit Required:** true  
+//!
+//! ⚠️  SECURITY WARNING: This contract has not been audited. Use at your own risk. Deploy only after thorough testing and security review. CRITICAL: Formal verification required.
+//!
+//! **Testing Requirements:** Requirements: Formal verification, comprehensive audit, stress testing, security review
+//!
+//! Use this contract only after understanding the risks and implementing appropriate security measures.
+//!
 //! ## Public Interface (ABI)
 //!
 //! | Function | Description |
@@ -19,8 +31,18 @@
 //! ## Error Codes
 //!
 //! See [`Error`] for the full list of contract error variants.
+//!
+//! ## Security Considerations
+//!
+//! - This contract handles multi-signature authorization for potentially valuable assets
+//! - Threshold configuration is critical for security - ensure proper M-of-N ratios
+//! - All signers should be verified and trustworthy addresses
+//! - Proposal execution should be carefully reviewed before approval
+//! - Consider time locks for high-value operations
+//! - Monitor for unusual proposal patterns or rapid approvals
 #![no_std]
 
+use security_disclaimers::{DisclaimerCategory, SecurityLevel};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, Bytes,
     Env, IntoVal, Symbol, Val, Vec,
@@ -79,6 +101,21 @@ pub struct MultisigWallet;
 
 #[contractimpl]
 impl MultisigWallet {
+    /// Get security disclaimer for this contract
+    pub fn get_security_disclaimer(env: Env, category: DisclaimerCategory) -> soroban_sdk::String {
+        security_disclaimers::get_disclaimer(env.clone(), SecurityLevel::Critical, category)
+    }
+
+    /// Validate security configuration
+    pub fn validate_security_config(env: Env, has_admin: bool, has_upgrade: bool) -> bool {
+        security_disclaimers::validate_security_config(
+            env,
+            SecurityLevel::Critical,
+            has_admin,
+            has_upgrade,
+        )
+    }
+
     /// Initialize the multisig wallet with a list of signers and a threshold.
     pub fn init(env: Env, signers: Vec<Address>, threshold: u32) {
         if env.storage().instance().has(&DataKey::Threshold) {

@@ -1243,8 +1243,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "governance-contract"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "security-disclaimers",
  "soroban-sdk",
 ]
 
@@ -1972,9 +1973,10 @@ dependencies = [
 
 [[package]]
 name = "multisig-wallet"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
+ "security-disclaimers",
  "soroban-sdk",
 ]
 
@@ -2932,6 +2934,13 @@ dependencies = [
  "generic-array",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "security-disclaimers"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -3901,8 +3910,9 @@ dependencies = [
 
 [[package]]
 name = "uups-proxy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "security-disclaimers",
  "soroban-sdk",
 ]
 

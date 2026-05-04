@@ -28,6 +28,9 @@ use std::collections::HashSet;
 use std::panic::catch_unwind;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
+
+// Import upgrade analysis functions
+use crate::upgrade_analysis::{is_init_fn, is_upgrade_or_admin_fn};
 use syn::{parse_str, Fields, File, Item, Meta, Type};
 
 /// LRU analysis result cache keyed by source content hash.
@@ -598,6 +601,7 @@ impl Analyzer {
         with_panic_guard(|| sep41::verify(source))
     }
 
+    #[allow(dead_code)]
     fn analyze_upgrade_patterns_impl(&self, source: &str) -> UpgradeReport {
         let file = match parse_str::<File>(source) {
             Ok(f) => f,

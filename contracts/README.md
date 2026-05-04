@@ -32,6 +32,17 @@ This directory contains the Soroban contracts used by Sanctifier for analysis, f
 - `vulnerable-contract/`: A reference implementation demonstrating common security pitfalls Sanctifier can detect.
 - `fixtures/finding-codes/`: Scan fixtures mapped to `S001` through `S012`.
 
+## 🔐 Security Disclaimers
+
+All contracts in this directory include standardized security disclaimers and safe usage guidelines:
+
+- **Security Levels:** Critical, High, Medium, Low based on risk exposure
+- **Disclaimer Categories:** Audit, Usage, Upgrade, Emergency
+- **Runtime Validation:** Security configuration checks in sensitive operations
+- **Documentation:** Comprehensive security considerations in each contract
+
+For detailed implementation guidance, see [Contract Security Disclaimers Guide](../docs/contract-security-disclaimers.md).
+
 ## Development
 
 Run tests for one contract:
@@ -49,4 +60,10 @@ sanctifier analyze contracts
 For finding-code focused fixture scans:
 ```bash
 sanctifier analyze contracts/fixtures/finding-codes --format json
+```
+
+Run security disclaimer tests:
+
+```bash
+cargo test -p security-disclaimers
 ```
