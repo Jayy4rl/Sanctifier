@@ -3,7 +3,7 @@
  * Issue #577: Improve UX/DX and defaults (frontend unit/integration tests)
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('Frontend UI Defaults and UX/DX', () => {
   describe('Default Configurations', () => {

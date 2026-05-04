@@ -17,32 +17,32 @@ export function AiFixPanel({ finding, onClose }: AiFixPanelProps) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    const fetchExplanation = async () => {
+      if (!finding) return;
+      setIsLoading(true);
+      setExplanation(null);
+      setFixCode(null);
+
+      try {
+        const response = await fetch("/api/ai/explain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ finding }),
+        });
+        const data = await response.json();
+        setExplanation(data.explanation);
+        setFixCode(data.fixCode);
+      } catch (_err) {
+        setExplanation("Failed to generate AI explanation. Please try again later.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     if (finding) {
       fetchExplanation();
     }
   }, [finding]);
-
-  const fetchExplanation = async () => {
-    if (!finding) return;
-    setIsLoading(true);
-    setExplanation(null);
-    setFixCode(null);
-
-    try {
-      const response = await fetch("/api/ai/explain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ finding }),
-      });
-      const data = await response.json();
-      setExplanation(data.explanation);
-      setFixCode(data.fixCode);
-    } catch (err) {
-      setExplanation("Failed to generate AI explanation. Please try again later.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const copyCode = () => {
     if (fixCode) {

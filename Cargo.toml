@@ -3,6 +3,7 @@ members = [
     "tooling/sanctifier-core",
     "tooling/sanctifier-cli",
     "tooling/sanctifier-wasm",
+    "contracts/security-disclaimers",
     "contracts/vulnerable-contract",
     "contracts/token-with-bugs",
     "contracts/amm-pool",
@@ -22,7 +23,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-soroban-sdk = { version = "21.7.6" }
+soroban-sdk = { version = "21.7.0" }
 
 [workspace.package]
 rust-version = "1.78"

@@ -61,7 +61,7 @@ mod tests {
         let env = Env::default();
         let (client, _) = setup(&env);
         let alice = Address::generate(&env);
-        client.mint(&alice, &i128::MAX / 2);
+        client.mint(&alice, &(i128::MAX / 2));
     }
 
     // -----------------------------------------------------------------------

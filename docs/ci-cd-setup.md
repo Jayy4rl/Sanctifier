@@ -354,6 +354,15 @@ Enable via GitHub Settings:
 
 ## Troubleshooting
 
+### Issue: "Invalid SOROBAN_SECRET_KEY format"
+
+**Solution:**
+Secret keys must start with 'S' and be exactly 56 characters long.
+```bash
+# Correct format example
+export SOROBAN_SECRET_KEY=SBXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
 ### Issue: "Secret SOROBAN_SECRET_KEY not available"
 
 **Solution:**
@@ -368,14 +377,14 @@ gh secret set SOROBAN_SECRET_KEY --body "SBXXXXXXX..."
 gh workflow run soroban-deploy.yml
 ```
 
-### Issue: "Workflow failed: Soroban binary not found"
+### Issue: "Workflow failed: Soroban binary not found" (or other tool missing)
 
 **Solution:**
-The workflow automatically installs Soroban. If it fails:
-
-1. Check network connectivity in workflow logs
-2. Try manual dispatch with retry
-3. File an issue if persists
+The scripts now validate that all required tools (`cargo`, `soroban`, `jq`, `curl`) are installed.
+1. If running locally, install the missing tool.
+2. In GitHub Actions, the workflow automatically installs Soroban. If it fails:
+   - Check network connectivity in workflow logs
+   - Try manual dispatch with retry
 
 ### Issue: "Deployment successful but validation failed"
 
@@ -394,6 +403,15 @@ soroban network info --network testnet
 ```
 
 3. Wait for contract to finalize on network
+
+### Issue: "Invalid Contract ID format"
+
+**Solution:**
+Contract IDs must start with 'C' and be exactly 56 characters long.
+```bash
+# Correct format example
+./scripts/validate-runtime-guards.sh --contract-id CAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
 
 ### Issue: "Cannot access secrets in local run"
 

@@ -43,7 +43,7 @@ pub enum DataKey {
     };
 
     return NextResponse.json(result);
-  } catch (err) {
+  } catch (_err) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

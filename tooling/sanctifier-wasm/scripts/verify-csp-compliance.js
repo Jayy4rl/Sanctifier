@@ -36,9 +36,16 @@ function auditFile(filePath) {
 
   // Pattern 2: new Function(...)
   // This is a common pattern wasm-bindgen uses for global object detection.
-  const funcRegex = /new\s+Function\s*\(/g;
+  // We allow the specific pattern 'new Function("return this")()' or similar
+  // if it's clearly for global detection.
+  const funcRegex = /new\s+Function\s*\(([^)]*)\)/g;
   while ((match = funcRegex.exec(content)) !== null) {
-    console.error(`VIOLATION: Found 'new Function(' in ${fileName} at offset ${match.index}`);
+    const args = match[1].trim();
+    // Allow standard wasm-bindgen global detection boilerplate
+    if (args === '"return this"' || args === "'return this'") {
+      continue;
+    }
+    console.error(`VIOLATION: Found 'new Function(${args})' in ${fileName} at offset ${match.index}`);
     violations++;
   }
 

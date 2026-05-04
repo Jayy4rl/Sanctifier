@@ -28,6 +28,9 @@ use std::collections::HashSet;
 use std::panic::catch_unwind;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
+
+// Import upgrade analysis functions
+use crate::upgrade_analysis::{is_init_fn, is_upgrade_or_admin_fn};
 use syn::{parse_str, Fields, File, Item, Meta, Type};
 
 /// LRU analysis result cache keyed by source content hash.
@@ -88,6 +91,7 @@ pub use smt::SmtInvariantIssue;
 
 use crate::rules::arithmetic_overflow::ArithVisitor;
 use crate::rules::truncation_bounds::TruncationBoundsVisitor;
+use crate::upgrade_analysis::{is_init_fn, is_upgrade_or_admin_fn};
 
 const DEFAULT_STRICT_THRESHOLD: f64 = 0.9;
 fn with_panic_guard<F, R>(f: F) -> R
@@ -597,6 +601,58 @@ impl Analyzer {
         with_panic_guard(|| sep41::verify(source))
     }
 
+    #[allow(dead_code)]
+    fn analyze_upgrade_patterns_impl(&self, source: &str) -> UpgradeReport {
+        let file = match parse_str::<File>(source) {
+            Ok(f) => f,
+            Err(_) => return UpgradeReport::empty(),
+        };
+
+        let mut report = UpgradeReport::empty();
+
+        for item in &file.items {
+            match item {
+                Item::Struct(s) if has_contracttype(&s.attrs) => {
+                    report.storage_types.push(s.ident.to_string());
+                }
+                Item::Enum(e) if has_contracttype(&e.attrs) => {
+                    report.storage_types.push(e.ident.to_string());
+                }
+                Item::Impl(i) => {
+                    for impl_item in &i.items {
+                        if let syn::ImplItem::Fn(f) = impl_item {
+                            if let syn::Visibility::Public(_) = f.vis {
+                                let fn_name = f.sig.ident.to_string();
+                                if is_init_fn(&fn_name) {
+                                    report.init_functions.push(fn_name.clone());
+                                }
+                                if is_upgrade_or_admin_fn(&fn_name) {
+                                    report.upgrade_mechanisms.push(fn_name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !report.upgrade_mechanisms.is_empty() {
+            report.findings.push(UpgradeFinding {
+                category: UpgradeCategory::Governance,
+                function_name: report.upgrade_mechanisms.first().cloned(),
+                location: report
+                    .upgrade_mechanisms
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "<unknown>".to_string()),
+                message: "Upgrade/admin mechanism detected".to_string(),
+                suggestion: "Ensure upgrade/admin functions are properly access-controlled (e.g. require_auth) and consider timelocks/governance.".to_string(),
+            });
+        }
+
+        report
+    }
 
     /// Detect public functions that mutate storage or call external contracts
     /// without an authentication check.
