@@ -4,7 +4,6 @@ import path from "path";
 import os from "os";
 import { mkdtemp, rm, writeFile } from "fs/promises";
 import { normalizeReport, transformReport } from "../../lib/transform";
-import { recordScanAudit } from "../../lib/audit-trail";
 import type { Finding } from "../../types";
 
 export const runtime = "nodejs";
@@ -13,7 +12,7 @@ const REPO_ROOT = path.resolve(process.cwd(), "..");
 const SUPPORTED_SOURCE_EXTENSIONS = new Set([".rs"]);
 const MAX_FILE_SIZE_BYTES = 250 * 1024;
 const EXECUTION_TIMEOUT_MS = 30000;
-const RATE_LIMIT_REQUESTS_PER_MINUTE = (process.env.CI || process.env.NODE_ENV === "test") ? 1000 : 10;
+const RATE_LIMIT_REQUESTS_PER_MINUTE = 10;
 const SANCTIFIER_BIN = process.env.SANCTIFIER_BIN?.trim() || "sanctifier";
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -249,51 +248,20 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const startMs = Date.now();
   const clientIP = getClientIP(request);
-
-  // Audit-trail mutable state — updated as we learn more about the request.
-  let auditFileName = "unknown";
-  let auditFileSizeBytes = 0;
-  let auditOutcomeCode = 500;
-  let auditTotalFindings = 0;
-  let auditHasCritical = false;
-  let auditHasHigh = false;
-
   const rateLimitResult = checkRateLimit(clientIP);
-
+  
   if (!rateLimitResult.allowed) {
-    auditOutcomeCode = 429;
-    recordScanAudit({
-      timestamp: new Date(startMs).toISOString(),
-      clientIp: clientIP,
-      fileName: auditFileName,
-      fileSizeBytes: auditFileSizeBytes,
-      latencyMs: Date.now() - startMs,
-      outcomeCode: auditOutcomeCode,
-      totalFindings: 0,
-      hasCritical: false,
-      hasHigh: false,
-    });
     return Response.json(
       { error: "Rate limit exceeded. Please try again later." },
-      {
+      { 
         status: 429,
-        headers: { "Retry-After": rateLimitResult.retryAfter.toString() },
+        headers: { "Retry-After": rateLimitResult.retryAfter.toString() }
       }
     );
   }
 
-  // Helper: records the outcome code so the finally-block audit has it.
-  const respond = (body: unknown, init?: ResponseInit): Response => {
-    auditOutcomeCode = (init as { status?: number } | undefined)?.status ?? 200;
-    return Response.json(body, init);
-  };
-
-  let tempDir: string | null = null;
-
-  try {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "sanctifier-contract-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "sanctifier-contract-"));
     const contentType = request.headers.get("content-type") ?? "";
 
     let sourcePayload: { fileName: string; source: string } | null = null;
@@ -305,11 +273,11 @@ export async function POST(request: NextRequest) {
           : null;
 
       if (!source || !source.trim()) {
-        return respond({ error: "Provide JSON body as { source: string }." }, { status: 400 });
+        return Response.json({ error: "Provide JSON body as { source: string }." }, { status: 400 });
       }
 
       if (Buffer.byteLength(source, "utf8") > MAX_FILE_SIZE_BYTES) {
-        return respond(
+        return Response.json(
           { error: `Source exceeds limit of ${MAX_FILE_SIZE_BYTES / 1024} KB.` },
           { status: 413 }
         );
@@ -320,21 +288,18 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData();
       sourcePayload = await parseMultipartSource(formData);
       if (!sourcePayload) {
-        return respond({ error: "Attach a Rust .rs file in `contract` field." }, { status: 400 });
+        return Response.json({ error: "Attach a Rust .rs file in `contract` field." }, { status: 400 });
       }
     } else {
-      return respond(
+      return Response.json(
         { error: "Content-Type must be multipart/form-data or application/json." },
         { status: 400 }
       );
     }
 
     // Capture file metadata for the audit record now that we have a parsed payload.
-    auditFileName = sourcePayload.fileName;
-    auditFileSizeBytes = Buffer.byteLength(sourcePayload.source, "utf8");
-
     if (!looksLikeSorobanContract(sourcePayload.source)) {
-      return respond(
+      return Response.json(
         { error: "Source is not a Soroban contract (missing soroban-sdk import)." },
         { status: 422 }
       );
@@ -348,13 +313,10 @@ export async function POST(request: NextRequest) {
 
     if (report) {
       const findings: Finding[] = transformReport(normalizeReport(report));
-      auditTotalFindings = findings.length;
-      auditHasCritical = findings.some((f) => f.severity === "critical");
-      auditHasHigh = findings.some((f) => f.severity === "high");
-      return respond(findings);
+      return Response.json(findings);
     }
 
-    return respond(
+    return Response.json(
       {
         error:
           stderr.trim() ||
@@ -365,27 +327,27 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("PAYLOAD_TOO_LARGE:")) {
-      return respond(
+      return Response.json(
         { error: `File size exceeds limit of ${MAX_FILE_SIZE_BYTES / 1024} KB.` },
         { status: 413 }
       );
     }
     if (error instanceof Error && error.message === "UNSUPPORTED_EXTENSION") {
-      return respond(
+      return Response.json(
         { error: "Only .rs contract source files are supported right now." },
         { status: 400 }
       );
     }
     if (error instanceof Error && error.message === "INVALID_UTF8") {
-      return respond({ error: "File content is not valid UTF-8." }, { status: 400 });
+      return Response.json({ error: "File content is not valid UTF-8." }, { status: 400 });
     }
     if (error instanceof Error && error.message.includes("timed out")) {
-      return respond(
+      return Response.json(
         { error: "Analysis timed out. Please try with a smaller contract." },
         { status: 504 }
       );
     }
-    return respond(
+    return Response.json(
       {
         error:
           error instanceof Error ? error.message : "Contract analysis failed unexpectedly.",
@@ -393,17 +355,6 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   } finally {
-    recordScanAudit({
-      timestamp: new Date(startMs).toISOString(),
-      clientIp: clientIP,
-      fileName: auditFileName,
-      fileSizeBytes: auditFileSizeBytes,
-      latencyMs: Date.now() - startMs,
-      outcomeCode: auditOutcomeCode,
-      totalFindings: auditTotalFindings,
-      hasCritical: auditHasCritical,
-      hasHigh: auditHasHigh,
-    });
-    if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
 }
