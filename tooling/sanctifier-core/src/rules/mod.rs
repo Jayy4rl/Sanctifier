@@ -38,6 +38,8 @@ pub mod variable_shadowing;
 pub mod raw_invoke_contract;
 /// `#[test]` functions that never reference a `ContractClient`.
 pub mod shallow_test;
+/// transfer_from-style flows that consume 'from' balance without allowance checks.
+pub mod transfer_from_no_allowance;
 use serde::Serialize;
 use std::any::Any;
 
@@ -200,6 +202,7 @@ impl RuleRegistry {
         registry.register(instance_storage_misuse::InstanceStorageMisuseRule::new());
         registry.register(raw_invoke_contract::RawInvokeContractRule::new());
         registry.register(shallow_test::ShallowTestRule::new());
+        registry.register(transfer_from_no_allowance::TransferFromNoAllowanceRule::new());
         registry
     }
 }
