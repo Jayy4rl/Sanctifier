@@ -1,5 +1,4 @@
-use clap::Args;
-use colored::*;
+
 use rayon::prelude::*;
 use sanctifier_core::finding_codes;
 use sanctifier_core::{Analyzer, SanctifyConfig};
@@ -11,7 +10,7 @@ pub struct AnalyzeArgs {
     /// Path to the contract directory or Cargo.toml
     #[arg(default_value = ".")]
     pub path: PathBuf,
-    /// Output format (text, json)
+    /// Output format (text, json, sarif)
     #[arg(short, long, default_value = "text")]
     pub format: String,
     /// Limit for ledger entry size in bytes
@@ -77,11 +76,7 @@ pub fn exec(args: AnalyzeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-    println!(
-        "{} Sanctifier: Valid Soroban project found at {:?}",
-        "✨".green(),
-        path
-    );
+
 
     let config = SanctifyConfig::default();
     let analyzer = Analyzer::new(config);
@@ -200,62 +195,35 @@ pub fn exec(args: AnalyzeArgs) -> anyhow::Result<()> {
     if let Some(profile) = args.profile {
         println!(
             "{} Profile: {} — {}",
-            "ℹ".blue(),
-            profile.as_str().bold(),
+            c::blue("ℹ"),
+            c::bold(profile.as_str()),
             profile.description()
         );
     }
     if !timed_out_files.is_empty() {
         println!(
             "\n{} {} file(s) timed out ({}s limit):",
-            "⏱️".yellow(),
+            c::yellow("⏱️"),
             timed_out_files.len(),
             timeout_secs
         );
         for f in &timed_out_files {
             println!(
                 "   {} [{}] {}",
-                "->".red(),
-                finding_codes::ANALYSIS_TIMEOUT.bold(),
+                c::red("->"),
+                c::bold(finding_codes::ANALYSIS_TIMEOUT),
                 f
             );
         }
     }
     if collisions.is_empty() {
-        println!("\n{} No storage key collisions found.", "✅".green());
+        println!("\n{} No storage key collisions found.", c::green("✅"));
     } else {
         println!(
             "\n{} Found potential Storage Key Collisions!",
-            "⚠️".yellow()
+            c::yellow("⚠️")
         );
-        for collision in collisions {
-            println!("   {} Value: {}", "->".red(), collision.key_value.bold());
-            println!("      Type: {}", collision.key_type);
-            println!("      Location: {}", collision.location);
-            println!("      Message: {}", collision.message);
-        }
-    }
 
-    Ok(())
-}
-
-fn walk_dir(
-    dir: &Path,
-    analyzer: &Analyzer,
-    collisions: &mut Vec<sanctifier_core::StorageCollisionIssue>,
-) -> anyhow::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            walk_dir(&path, analyzer, collisions)?;
-        } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            if let Ok(content) = fs::read_to_string(&path) {
-                let mut issues = analyzer.scan_storage_collisions(&content);
-                // Prefix location with filename
-                let file_name = path.display().to_string();
-                for issue in &mut issues {
-                    issue.location = format!("{}:{}", file_name, issue.location);
                 }
                 println!("      Location: {}", finding.location);
                 println!("      Message: {}", finding.message);
@@ -264,28 +232,28 @@ fn walk_dir(
         }
     }
     if !smt_issues.is_empty() {
-        println!("\n{} Found Formal Verification (SMT) issues!", "❌".red());
+        println!("\n{} Found Formal Verification (SMT) issues!", c::red("❌"));
         for issue in &smt_issues {
             println!(
                 "   {} [{}] Function: {}",
-                "->".red(),
-                finding_codes::SMT_INVARIANT_VIOLATION.bold(),
-                issue.function_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::SMT_INVARIANT_VIOLATION),
+                c::bold(&issue.function_name)
             );
             println!("      Description: {}", issue.description);
             println!("      Location: {}", issue.location);
         }
     }
     if !sep41_checked_contracts.is_empty() && sep41_issues.is_empty() {
-        println!("{} SEP-41 token interface verified exactly.", "✅".green());
+        println!("{} SEP-41 token interface verified exactly.", c::green("✅"));
     } else if !sep41_issues.is_empty() {
-        println!("\n{} Found SEP-41 Interface Deviations!", "⚠️".yellow());
+        println!("\n{} Found SEP-41 Interface Deviations!", c::yellow("⚠️"));
         for issue in &sep41_issues {
             println!(
                 "   {} [{}] Function: {}",
-                "->".red(),
-                finding_codes::SEP41_INTERFACE_DEVIATION.bold(),
-                issue.function_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::SEP41_INTERFACE_DEVIATION),
+                c::bold(&issue.function_name)
             );
             println!("      Kind: {:?}", issue.kind);
             println!("      Location: {}", issue.location);
@@ -297,13 +265,13 @@ fn walk_dir(
         }
     }
     if !contractimport_issues.is_empty() {
-        println!("\n{} Found ContractImport Mismatches!", "⚠️".yellow());
+        println!("\n{} Found ContractImport Mismatches!", c::yellow("⚠️"));
         for issue in &contractimport_issues {
             println!(
                 "   {} [{}] WASM: {}",
-                "->".red(),
-                finding_codes::CONTRACTIMPORT_MISMATCH.bold(),
-                issue.wasm_path.bold()
+                c::red("->"),
+                c::bold(finding_codes::CONTRACTIMPORT_MISMATCH),
+                c::bold(&issue.wasm_path)
             );
             println!("      Location: {}", issue.location);
             println!("      Message: {}", issue.message);
@@ -312,28 +280,28 @@ fn walk_dir(
     if vuln_matches.is_empty() {
         println!(
             "{} No known vulnerability patterns matched (DB v{}).",
-            "✅".green(),
+            c::green("✅"),
             vuln_db.version
         );
     } else {
         println!(
             "\n{} Found {} known vulnerability pattern(s) (DB v{})!",
-            "🛡️".red(),
+            c::red("🛡️"),
             vuln_matches.len(),
             vuln_db.version
         );
         for m in &vuln_matches {
             let sev_icon = match m.severity.as_str() {
-                "critical" => "❌".red(),
-                "high" => "🔴".red(),
-                "medium" => "⚠️".yellow(),
-                _ => "ℹ️".blue(),
+                "critical" => c::red("❌"),
+                "high" => c::red("🔴"),
+                "medium" => c::yellow("⚠️"),
+                _ => c::blue("ℹ️"),
             };
             println!(
                 "   {} [{}] {} ({})",
                 sev_icon,
-                m.vuln_id.bold(),
-                m.name.bold(),
+                c::bold(&m.vuln_id),
+                c::bold(&m.name),
                 m.severity.to_uppercase()
             );
             println!("      File: {}:{}", m.file, m.line);
@@ -346,11 +314,70 @@ fn walk_dir(
 
     let cached_count = cached_counter.load(Ordering::Relaxed);
     let reanalysed_count = total_files - cached_count;
+
+    if is_sarif {
+        let mut sarif_results: Vec<serde_json::Value> = Vec::new();
+        for gap in &auth_gaps {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::AUTH_GAP,
+                "level": "error",
+                "message": { "text": format!("Missing require_auth() in function {}", gap.function_name) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": gap.function_name.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+        for issue in &panic_issues {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::PANIC_USAGE,
+                "level": "warning",
+                "message": { "text": format!("{} at {}", issue.issue_type, issue.location) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": issue.location.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+        for issue in &arithmetic_issues {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::ARITHMETIC_OVERFLOW,
+                "level": "warning",
+                "message": { "text": format!("Unchecked {} at {}", issue.operation, issue.location) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": issue.location.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+
+        let sarif_log = crate::commands::sarif::build_sarif_log(
+            "Sanctifier",
+            env!("CARGO_PKG_VERSION"),
+            sarif_results,
+        );
+
+        if let Err(e) = crate::commands::sarif::validate_sarif(&sarif_log) {
+            eprintln!("{}", c::red("SARIF validation failed:"));
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+
+        println!("{}", serde_json::to_string_pretty(&sarif_log)?);
+        return Ok(should_exit_with_1);
+    }
+
     println!(
         "\n{} Static analysis complete. ({} served from cache, {} re-analysed, {} ms)",
-        "✨".green(),
-        cached_count.to_string().bold(),
-        reanalysed_count.to_string().bold(),
+        c::green("✨"),
+        c::bold(&cached_count.to_string()),
+        c::bold(&reanalysed_count.to_string()),
         duration_ms
     );
     Ok(should_exit_with_1)

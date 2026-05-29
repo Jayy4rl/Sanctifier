@@ -1,5 +1,5 @@
 use clap::Args;
-use colored::Colorize;
+use crate::commands::color as c;
 use sanctifier_core::{CustomRule, SanctifyConfig};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -68,7 +68,7 @@ pub struct OutputFormatter;
 
 impl OutputFormatter {
     pub fn display_success(config_path: &Path) {
-        println!("{} Configuration file created successfully!", "✓".green());
+        println!("{} Configuration file created successfully!", c::green("✓"));
         println!("   Location: {}", config_path.display());
     }
 

@@ -77,6 +77,8 @@ pub const MISSING_TTL_BUMP: &str = "S025";
 pub const TAINT_PROPAGATION: &str = "S026";
 /// External call before state write without a reentrancy guard (static, complement to runtime guard).
 pub const STATIC_REENTRANCY: &str = "S027";
+/// Usage of storage/deployment APIs that were removed or renamed in Soroban SDK v22.
+pub const DEPRECATED_SDK_USAGE: &str = "S028";
 
 /// A single finding-code entry with machine-readable code, category, and
 /// human-readable description.
@@ -234,6 +236,11 @@ pub fn all_finding_codes() -> Vec<FindingCode> {
             category: "reentrancy",
             description: "External contract call precedes a storage mutation without a reentrancy guard — classic checks-effects-interactions violation",
         },
+        FindingCode {
+            code: DEPRECATED_SDK_USAGE,
+            category: "sdk_migration",
+            description: "Usage of a storage or deployment API removed or renamed in Soroban SDK v22 — bump(), RawVal, and deployer().deploy() must be migrated",
+        },
     ]
 }
 
@@ -274,5 +281,6 @@ mod tests {
         assert!(codes.iter().any(|c| c.code == MISSING_TTL_BUMP));
         assert!(codes.iter().any(|c| c.code == TAINT_PROPAGATION));
         assert!(codes.iter().any(|c| c.code == STATIC_REENTRANCY));
+        assert!(codes.iter().any(|c| c.code == DEPRECATED_SDK_USAGE));
     }
 }

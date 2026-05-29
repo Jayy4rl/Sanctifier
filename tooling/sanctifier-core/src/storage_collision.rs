@@ -5,6 +5,22 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{Expr, ExprCall, ExprMacro, ItemConst, Lit};
 
+#[derive(Debug, Serialize, Clone)]
+pub struct StorageCollisionIssue {
+    pub key_value: String,
+    pub key_type: String,
+    pub location: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SorobanStorageType {
+    Instance,
+    Persistent,
+    Temporary,
+    Unknown,
+}
+
 impl SorobanStorageType {
     fn as_str(self) -> &'static str {
         match self {
@@ -39,13 +55,13 @@ impl StorageVisitor {
 
 
 
-    fn add_key(&mut self, value: String, key_type: String, location: String, line: usize) {
+    fn add_key(&mut self, value: String, key_type: String, storage_type: SorobanStorageType, location: String, line: usize) {
         let info = KeyInfo {
             key_type,
             location,
             line,
         };
-        self.keys.entry(value).or_default().push(info);
+        self.keys.entry((storage_type, value)).or_default().push(info);
     }
 
     pub fn final_check(&mut self) {
@@ -130,7 +146,7 @@ impl<'ast> Visit<'ast> for StorageVisitor {
                 );
             }
         }
-        visit::visit_item_const(self, i);
+        syn::visit::visit_item_const(self, i);
     }
 
     fn visit_expr_call(&mut self, i: &'ast ExprCall) {
@@ -147,6 +163,7 @@ impl<'ast> Visit<'ast> for StorageVisitor {
                             self.add_key(
                                 val,
                                 "Symbol::new".to_string(),
+                                SorobanStorageType::Unknown,
                                 "inline".to_string(),
                                 i.span().start().line,
                             );
@@ -155,7 +172,7 @@ impl<'ast> Visit<'ast> for StorageVisitor {
                 }
             }
         }
-        visit::visit_expr_call(self, i);
+        syn::visit::visit_expr_call(self, i);
     }
 
     fn visit_expr_macro(&mut self, i: &'ast ExprMacro) {
@@ -174,10 +191,11 @@ impl<'ast> Visit<'ast> for StorageVisitor {
             self.add_key(
                 val,
                 "symbol_short!".to_string(),
+                SorobanStorageType::Unknown,
                 "inline".to_string(),
                 i.span().start().line,
             );
         }
-        visit::visit_expr_method_call(self, i);
+        syn::visit::visit_expr_macro(self, i);
     }
 }

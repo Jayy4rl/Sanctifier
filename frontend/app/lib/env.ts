@@ -17,6 +17,8 @@ const entries: EnvEntry[] = [
   { key: "RATE_LIMIT_REQUESTS_PER_MINUTE",  value: process.env.RATE_LIMIT_REQUESTS_PER_MINUTE,  defaultValue: "10", description: "Max analyze requests per IP per minute" },
   { key: "API_KEYS",                         value: process.env.API_KEYS,                         description: "Comma-separated API keys for /api/v1/analyze endpoint" },
   { key: "API_RATE_LIMIT_PER_MINUTE",        value: process.env.API_RATE_LIMIT_PER_MINUTE,        defaultValue: "20", description: "Max v1 analyze requests per API key per minute" },
+  { key: "AI_RATE_LIMIT_REQUESTS_PER_MINUTE", value: process.env.AI_RATE_LIMIT_REQUESTS_PER_MINUTE, defaultValue: "10", description: "Max AI explain requests per IP per minute" },
+  { key: "AI_DAILY_COST_CAP_CENTS",          value: process.env.AI_DAILY_COST_CAP_CENTS,          defaultValue: "100", description: "Global daily AI cost cap in US cents" },
 ];
 
 function statusOf(entry: EnvEntry): Status {

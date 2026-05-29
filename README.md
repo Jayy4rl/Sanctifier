@@ -1,4 +1,10 @@
 <div align="center">
+
+**[English](README.md)** | **[Español](README.es.md)** | **[中文](README.zh-CN.md)** | **[日本語](README.ja.md)** | **[Français](README.fr.md)**
+
+</div>
+
+<div align="center">
   <img src="branding/logo.png" width="220" alt="Sanctifier" />
 
   # Sanctifier

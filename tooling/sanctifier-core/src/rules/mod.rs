@@ -48,6 +48,8 @@ pub mod missing_ttl_bump;
 pub mod taint_propagation;
 /// Static reentrancy — external call before state write (complement to runtime guard).
 pub mod static_reentrancy;
+/// Soroban SDK v22 deprecated storage/deployment API patterns.
+pub mod deprecated_sdk_usage;
 use serde::Serialize;
 use std::any::Any;
 
@@ -215,6 +217,7 @@ impl RuleRegistry {
         registry.register(missing_ttl_bump::MissingTtlBumpRule::new());
         registry.register(taint_propagation::TaintPropagationRule::new());
         registry.register(static_reentrancy::StaticReentrancyRule::new());
+        registry.register(deprecated_sdk_usage::DeprecatedSdkUsageRule::new());
         registry
     }
 }

@@ -2,11 +2,11 @@
 use quote::quote;
 use serde::Serialize;
 use syn::visit::Visit;
-use syn::{ExprCall, ExprMethodCall, File};
+use syn::{ExprMethodCall, File};
 
 use crate::rules::{Patch, Rule, RuleViolation, Severity};
 use syn::spanned::Spanned;
-use syn::{parse_str, File, Item};
+use syn::{parse_str, Item};
 
 /// Storage key used by the auto-generated reentrancy guard.
 const REENTRANCY_LOCK_KEY: &str = "REENTRANCY_LOCK";
@@ -546,8 +546,4 @@ mod tests {
         assert!(patch.replacement.contains("invoke_contract"));
     }
 
-    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
-        // Handle direct calls if needed
-        syn::visit::visit_expr_call(self, node);
-    }
 }
