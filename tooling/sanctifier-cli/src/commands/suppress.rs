@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
-use toml_edit::{value, Array, Document, Item, Table};
+use toml_edit::{value, Array, DocumentMut, Item, Table};
 
 #[derive(Args)]
 pub struct SuppressArgs {
@@ -67,7 +67,7 @@ fn add_suppression(
     };
 
     let mut doc = content
-        .parse::<Document>()
+        .parse::<DocumentMut>()
         .context("Failed to parse .sanctify.toml")?;
 
     // Ensure [suppressions] table exists
@@ -81,20 +81,20 @@ fn add_suppression(
 
     // Get or create array for this code
     if !suppressions.contains_key(code) {
-        suppressions[code] = Item::Value(value(Array::new()));
+        suppressions[code] = Item::Value(toml_edit::Value::Array(Array::new()));
     }
 
     let code_array = suppressions[code]
         .as_array_mut()
         .context("suppression entry must be an array")?;
 
-    // Create suppression entry
-    let mut entry = Table::new();
-    entry["file"] = value(file.display().to_string());
-    entry["line"] = value(line as i64);
-    entry["reason"] = value(reason);
+    // Create suppression entry as an inline table value
+    let mut entry = toml_edit::InlineTable::new();
+    entry.insert("file", toml_edit::Value::from(file.display().to_string()));
+    entry.insert("line", toml_edit::Value::from(line as i64));
+    entry.insert("reason", toml_edit::Value::from(reason));
 
-    code_array.push(entry);
+    code_array.push(toml_edit::Value::InlineTable(entry));
 
     // Write back
     fs::write(config_path, doc.to_string())
@@ -113,7 +113,7 @@ fn list_suppressions(config_path: &PathBuf) -> Result<()> {
         .with_context(|| format!("Failed to read {}", config_path.display()))?;
 
     let doc = content
-        .parse::<Document>()
+        .parse::<DocumentMut>()
         .context("Failed to parse .sanctify.toml")?;
 
     let Some(suppressions) = doc.get("suppressions").and_then(|s| s.as_table()) else {
@@ -135,7 +135,7 @@ fn list_suppressions(config_path: &PathBuf) -> Result<()> {
         };
 
         for entry in array.iter() {
-            let Some(table) = entry.as_table() else {
+            let Some(table) = entry.as_inline_table() else {
                 continue;
             };
 

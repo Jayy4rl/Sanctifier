@@ -30,21 +30,21 @@ impl ConfigGenerator {
             ],
             ledger_limit: 64000,
             strict_mode: false,
-            custom_rules: vec![
+            rules: vec![
                 CustomRule {
                     name: "no_unsafe_block".to_string(),
                     pattern: "unsafe\\s*\\{".to_string(),
+                    description: String::new(),
                     severity: sanctifier_core::RuleSeverity::Critical,
                 },
                 CustomRule {
                     name: "no_mem_forget".to_string(),
                     pattern: "std::mem::forget".to_string(),
+                    description: String::new(),
                     severity: sanctifier_core::RuleSeverity::High,
                 },
             ],
             approaching_threshold: 0.8,
-            max_findings: 0,
-            fail_fast: false,
         }
     }
 }
@@ -189,13 +189,13 @@ mod tests {
         assert_eq!(config.approaching_threshold, 0.8);
 
         // Verify custom_rules
-        assert_eq!(config.custom_rules.len(), 2);
+        assert_eq!(config.rules.len(), 2);
 
-        let rule1 = &config.custom_rules[0];
+        let rule1 = &config.rules[0];
         assert_eq!(rule1.name, "no_unsafe_block");
         assert_eq!(rule1.pattern, "unsafe\\s*\\{");
 
-        let rule2 = &config.custom_rules[1];
+        let rule2 = &config.rules[1];
         assert_eq!(rule2.name, "no_mem_forget");
         assert_eq!(rule2.pattern, "std::mem::forget");
     }
@@ -224,7 +224,7 @@ mod tests {
     fn test_custom_rules_have_valid_patterns() {
         let config = ConfigGenerator::generate_default_config();
 
-        for rule in &config.custom_rules {
+        for rule in &config.rules {
             assert!(
                 !rule.name.is_empty(),
                 "Custom rule name should not be empty"

@@ -91,7 +91,7 @@ fn main() {
 fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let log_output = match &cli.command {
-        Commands::Analyze(args) if args.format == "json" => logging::LogOutput::Json,
+        Commands::Analyze(args) if args.format == "json" || args.format == "ndjson" => logging::LogOutput::Json,
         Commands::Diff(args) if args.format == "json" => logging::LogOutput::Json,
         Commands::Gas(args) if args.format == commands::gas::OutputFormat::Json => {
             logging::LogOutput::Json
@@ -130,7 +130,15 @@ fn run() -> anyhow::Result<()> {
             format,
             output,
         } => {
-            use sanctifier_core::{callgraph_to_dot, Analyzer};
+            use sanctifier_core::Analyzer;
+            fn callgraph_to_dot(edges: &[sanctifier_core::ReentrancyEdge]) -> String {
+                let mut dot = String::from("digraph callgraph {\n");
+                for e in edges {
+                    dot.push_str(&format!("  \"{}\" -> \"{}\";\n", e.caller_function, e.target_contract));
+                }
+                dot.push_str("}\n");
+                dot
+            }
             let config = load_config(&path);
             let analyzer = Analyzer::new(config.clone());
             let is_json = format == "json";

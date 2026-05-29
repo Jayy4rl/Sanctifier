@@ -707,3 +707,109 @@ fn test_json_output_validates_against_schema() {
         );
     }
 }
+
+// ── NDJSON streaming tests ─────────────────────────────────────────────────────
+
+/// `--format ndjson` emits one JSON object per line and ends with `{"event":"done"}`.
+#[test]
+fn test_ndjson_output_structure() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("contract.rs");
+    fs::write(
+        &contract,
+        r#"fn transfer() { let a = 1u64; let b = 2u64; let c = a + b; }"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["analyze", "--format", "ndjson"])
+        .arg(&contract)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "exit code must be 0");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    assert!(!lines.is_empty(), "must emit at least one line");
+
+    // Every line must be valid JSON
+    for line in &lines {
+        serde_json::from_str::<Value>(line)
+            .unwrap_or_else(|_| panic!("line is not valid JSON: {}", line));
+    }
+
+    // Last line must be the done event
+    let last: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
+    assert_eq!(last["event"], "done", "last line must have event=done");
+    assert!(
+        last["total_findings"].is_number(),
+        "done line must have numeric total_findings"
+    );
+    assert!(
+        last["duration_ms"].is_number(),
+        "done line must have numeric duration_ms"
+    );
+}
+
+/// Finding lines carry the expected fields.
+#[test]
+fn test_ndjson_finding_fields() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("contract.rs");
+    fs::write(
+        &contract,
+        r#"fn add(a: u64, b: u64) -> u64 { a + b }"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["analyze", "--format", "ndjson"])
+        .arg(&contract)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let finding_lines: Vec<Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .filter(|v: &Value| v["event"] == "finding")
+        .collect();
+
+    assert!(!finding_lines.is_empty(), "must emit at least one finding for unchecked arithmetic");
+
+    for finding in &finding_lines {
+        assert!(finding["file"].is_string(), "finding must have file");
+        assert!(finding["rule"].is_string(), "finding must have rule");
+        assert!(finding["severity"].is_string(), "finding must have severity");
+        assert!(finding["message"].is_string(), "finding must have message");
+        assert!(finding["location"].is_string(), "finding must have location");
+    }
+}
+
+/// A file with no violations still produces a `done` line with `total_findings: 0`.
+#[test]
+fn test_ndjson_clean_file_emits_done() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("clean.rs");
+    fs::write(&contract, "// empty contract\n").unwrap();
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["analyze", "--format", "ndjson"])
+        .arg(&contract)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    assert_eq!(lines.len(), 1, "clean file: only the done line");
+
+    let done: Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(done["event"], "done");
+    assert_eq!(done["total_findings"], 0);
+}

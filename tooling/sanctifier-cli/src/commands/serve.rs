@@ -1,12 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Args;
-use sanctifier_core::{analysis_cache::AnalysisCache, Analyzer, SanctifyConfig};
+use sanctifier_core::rules::RuleRegistry;
+use sanctifier_core::SanctifyConfig;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
-use warp::{multipart::FormData, Filter, Rejection, Reply};
+use warp::{Filter, Rejection, Reply};
 
 #[derive(Args)]
 pub struct ServeArgs {
@@ -21,8 +19,7 @@ pub struct ServeArgs {
 
 #[derive(Clone)]
 struct AppState {
-    analyzer: Arc<Analyzer>,
-    cache: Arc<AnalysisCache>,
+    registry: Arc<RuleRegistry>,
 }
 
 pub fn exec(args: ServeArgs) -> Result<()> {
@@ -31,26 +28,22 @@ pub fn exec(args: ServeArgs) -> Result<()> {
 }
 
 async fn serve_async(args: ServeArgs) -> Result<()> {
-    let config = SanctifyConfig::default();
-    let analyzer = Arc::new(Analyzer::new(config));
-    let cache = Arc::new(AnalysisCache::new());
-
-    let state = AppState { analyzer, cache };
+    let registry = Arc::new(RuleRegistry::with_default_rules());
+    let state = AppState { registry };
 
     let addr: SocketAddr = format!("{}:{}", args.bind, args.port)
         .parse()
         .context("Invalid bind address")?;
 
-    println!("🚀 Sanctifier HTTP server starting on http://{}", addr);
-    println!("   POST /analyze - Analyze contract source");
-    println!("   GET /health - Health check");
-    println!();
+    println!("Sanctifier HTTP server starting on http://{}", addr);
+    println!("   POST /analyze (body: raw Rust source) — returns NDJSON findings");
+    println!("   GET  /health");
 
     let state_filter = warp::any().map(move || state.clone());
 
     let analyze_route = warp::post()
         .and(warp::path("analyze"))
-        .and(warp::multipart::form().max_length(5 * 1024 * 1024)) // 5MB limit
+        .and(warp::body::bytes())
         .and(state_filter.clone())
         .and_then(handle_analyze);
 
@@ -66,58 +59,23 @@ async fn serve_async(args: ServeArgs) -> Result<()> {
 }
 
 async fn handle_analyze(
-    form: FormData,
+    body: warp::hyper::body::Bytes,
     state: AppState,
 ) -> Result<impl Reply, Rejection> {
-    // Extract contract source from multipart form
-    let parts: Vec<_> = form.collect().await;
-    
-    let mut contract_source = None;
-    for part in parts {
-        let part = part.map_err(|_| warp::reject::reject())?;
-        if part.name() == "contract" {
-            let bytes = part
-                .data()
-                .await
-                .ok_or_else(|| warp::reject::reject())?
-                .map_err(|_| warp::reject::reject())?;
-            contract_source = Some(
-                String::from_utf8(bytes.to_vec())
-                    .map_err(|_| warp::reject::reject())?
-            );
-            break;
-        }
-    }
-
-    let source = contract_source.ok_or_else(|| warp::reject::reject())?;
-
-    // Write to temp file
-    let temp_dir = tempfile::tempdir().map_err(|_| warp::reject::reject())?;
-    let contract_path = temp_dir.path().join("contract.rs");
-    
-    let mut file = fs::File::create(&contract_path)
-        .await
-        .map_err(|_| warp::reject::reject())?;
-    file.write_all(source.as_bytes())
-        .await
-        .map_err(|_| warp::reject::reject())?;
-    file.flush().await.map_err(|_| warp::reject::reject())?;
-
-    // Check cache
-    let cache_key = format!("{:x}", md5::compute(&source));
-    if let Some(cached) = state.cache.get(&cache_key) {
-        return Ok(warp::reply::json(&cached));
-    }
-
-    // Analyze
-    let findings = state
-        .analyzer
-        .analyze_file(&contract_path)
-        .map_err(|_| warp::reject::reject())?;
-
-    // Cache result
-    state.cache.insert(cache_key, findings.clone());
-
+    let source = String::from_utf8(body.to_vec()).map_err(|_| warp::reject::reject())?;
+    let violations = state.registry.run_all(&source);
+    let findings: Vec<serde_json::Value> = violations
+        .into_iter()
+        .map(|v| {
+            serde_json::json!({
+                "rule": v.rule_name,
+                "severity": format!("{:?}", v.severity),
+                "message": v.message,
+                "location": v.location,
+                "suggestion": v.suggestion,
+            })
+        })
+        .collect();
     Ok(warp::reply::json(&findings))
 }
 
