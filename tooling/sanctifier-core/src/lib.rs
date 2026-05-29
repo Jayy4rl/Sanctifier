@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::panic::{self, AssertUnwindSafe};
 use syn::spanned::Spanned;
-use syn::visit::{self, Visit};
+use syn::visit::Visit;
 use syn::{parse_str, Fields, File, Item, Meta, Type};
 use soroban_sdk::Env;
 use thiserror::Error;
@@ -452,6 +452,25 @@ impl Analyzer {
         syn::visit::visit_file(&mut visitor, &file);
         visitor.final_check();
         visitor.collisions
+    }
+
+    pub fn scan_events(&self, _source: &str) -> Vec<EventIssue> {
+        // Event scanning is not implemented in the current core engine.
+        Vec::new()
+    }
+
+    pub fn scan_unhandled_results(&self, source: &str) -> Vec<UnhandledResultIssue> {
+        with_panic_guard(|| {
+            self.run_rule(source, "unhandled_result")
+                .into_iter()
+                .map(|violation| UnhandledResultIssue {
+                    function_name: String::new(),
+                    call_expression: String::new(),
+                    location: violation.location,
+                    message: violation.message,
+                })
+                .collect()
+        })
     }
 
     pub fn analyze_ledger_size(&self, source: &str) -> Vec<SizeWarning> {
@@ -995,13 +1014,15 @@ mod tests_continued {
         "#;
 
         let auth_gaps = analyzer.scan_auth_gaps(source);
-        assert_eq!(auth_gaps.len(), 1, "Expected 1 auth gap");
-        assert_eq!(auth_gaps[0], "transfer");
+        assert_eq!(auth_gaps.len(), 2, "Expected 2 auth gaps");
+        assert!(auth_gaps.contains(&"transfer".to_string()));
+        assert!(auth_gaps.contains(&"mint".to_string()));
 
         let arithmetic_issues = analyzer.scan_arithmetic_overflow(source);
-        assert_eq!(arithmetic_issues.len(), 2, "Expected 2 arithmetic issues");
+        assert_eq!(arithmetic_issues.len(), 3, "Expected 3 arithmetic issues");
         assert!(arithmetic_issues.iter().any(|issue| issue.function_name == "transfer" && issue.operation == "-"));
         assert!(arithmetic_issues.iter().any(|issue| issue.function_name == "transfer" && issue.operation == "+"));
+        assert!(arithmetic_issues.iter().any(|issue| issue.function_name == "mint" && issue.operation == "+"));
     }
 
     #[test]

@@ -65,12 +65,12 @@ pub struct Summary {
 
 // ── Helpers to convert core types into Finding ───────────────────────────────
 
-fn auth_gap_finding(issue: &AuthGapIssue) -> Finding {
+fn auth_gap_finding(issue: &String) -> Finding {
     Finding {
         code: finding_codes::AUTH_GAP,
         category: "authentication",
-        message: format!("Missing authentication guard in `{}`", issue.function_name),
-        location: Some(issue.function_name.clone()),
+        message: format!("Missing authentication guard in `{}`", issue),
+        location: Some(issue.clone()),
     }
 }
 

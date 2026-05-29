@@ -1,7 +1,7 @@
 //! Reentrancy analysis for Soroban contracts.
 use quote::quote;
 use serde::Serialize;
-use syn::visit::{self, Visit};
+use syn::visit::Visit;
 use syn::{File, ExprMethodCall, ExprCall};
 
 /// Edge representing a cross-contract call.
@@ -40,19 +40,19 @@ impl<'ast> Visit<'ast> for CallVisitor {
         syn::visit::visit_impl_item_fn(self, node);
     }
 
-    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
         if node.method == "invoke_contract" || node.method == "call" {
              self.edges.push(ReentrancyEdge {
                  caller_function: self.current_fn.clone(),
                  target_contract: "Unknown".to_string(), // Placeholder
                  target_function: "Unknown".to_string(), // Placeholder
-                 function_expr: Some(quote::quote!(#node).to_string()),
+                 function_expr: Some(quote!(#node).to_string()),
              });
         }
         syn::visit::visit_expr_method_call(self, node);
     }
 
-    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         // Handle direct calls if needed
         syn::visit::visit_expr_call(self, node);
     }

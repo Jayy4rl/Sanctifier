@@ -1,5 +1,5 @@
 use serde::Serialize;
-use syn::visit::{self, Visit};
+use syn::visit::Visit;
 use syn::{Expr, ExprCall, ExprMacro, ItemConst, Lit};
 use syn::spanned::Spanned;
 use std::collections::HashMap;

@@ -13,6 +13,8 @@ pub mod ledger_size;
 pub mod panic_detection;
 /// Shadow storage pattern detection.
 pub mod shadow_storage;
+/// Direct xdr::ScVal raw construction detection.
+pub mod xdr_raw_construction;
 /// Unhandled `Result` values.
 pub mod unhandled_result;
 /// Unused local variables.
@@ -170,6 +172,7 @@ impl RuleRegistry {
         registry.register(unhandled_result::UnhandledResultRule::new());
         registry.register(unused_variable::UnusedVariableRule::new());
         registry.register(shadow_storage::ShadowStorageRule::new());
+        registry.register(xdr_raw_construction::XdrRawConstructionRule::new());
         registry
     }
 }

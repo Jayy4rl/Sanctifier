@@ -19,5 +19,14 @@ rust-version = "1.78"
 
 [profile.release]
 opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
 lto = true
 codegen-units = 1
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

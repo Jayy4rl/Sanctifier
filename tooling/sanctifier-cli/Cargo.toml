@@ -4,11 +4,13 @@ name = "sanctifier-cli"
 version = "0.1.0"
 edition = "2021"
 description = "CLI tool for Sanctifier - Stellar Soroban Security Suite"
+license = "MIT OR Apache-2.0"
 homepage = "https://github.com/HyperSafeD/Sanctifier"
 repository = "https://github.com/HyperSafeD/Sanctifier"
-license = "MIT"
-keywords = ["stellar", "soroban", "security", "cli", "analysis"]
+documentation = "https://docs.rs/sanctifier-cli"
+keywords = ["soroban", "stellar", "security", "cli", "analysis"]
 categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }

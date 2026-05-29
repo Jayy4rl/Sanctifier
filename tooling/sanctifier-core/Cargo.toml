@@ -2,12 +2,14 @@
 name = "sanctifier-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core analysis logic for Sanctifier"
-homepage = "https://github.com/HyperSafeD/Sanctifier"
+description = "Static analysis library for Soroban smart contracts"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/HyperSafeD/Sanctifier"
-license = "MIT"
-keywords = ["stellar", "soroban", "security", "analysis"]
-categories = ["development-tools", "command-line-utilities"]
+homepage = "https://github.com/HyperSafeD/Sanctifier"
+documentation = "https://docs.rs/sanctifier-core"
+keywords = ["soroban", "stellar", "security", "static-analysis", "smart-contracts"]
+categories = ["development-tools::testing", "cryptography::cryptocurrencies"]
+readme = "README.md"
 
 [features]
 default = ["smt"]
