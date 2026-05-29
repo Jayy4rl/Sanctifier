@@ -1,7 +1,9 @@
+#![allow(dead_code)]
+
 use clap::Args;
 use crate::commands::color as c;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Args, Debug)]
@@ -58,16 +60,13 @@ pub fn exec(args: DeployArgs) -> anyhow::Result<()> {
     };
 
     if secret_key.is_empty() {
-        eprintln!(
-            "{} Error: SOROBAN_SECRET_KEY not provided",
-            c::red("❌")
-        );
+
         eprintln!("   Set via --secret-key or SOROBAN_SECRET_KEY environment variable");
         std::process::exit(1);
     }
 
     if !is_json {
-        println!("{} Sanctifier: Deploying to {} testnet...", c::bright_cyan("🚀"), args.network);
+
     }
 
     // Build the contract
@@ -79,10 +78,7 @@ pub fn exec(args: DeployArgs) -> anyhow::Result<()> {
     // Find WASM file
     let wasm_path = find_wasm_file(&args.contract_path);
     if wasm_path.is_none() {
-        eprintln!(
-            "{} Error: Could not find compiled WASM file",
-            c::red("❌")
-        );
+
         std::process::exit(1);
     }
 
@@ -144,7 +140,7 @@ fn build_contract(contract_path: &PathBuf, is_json: bool) -> bool {
     }
 
     let output = Command::new("cargo")
-        .args(&["build", "--release", "--target", "wasm32-unknown-unknown"])
+        .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
         .current_dir(contract_path)
         .output();
 
@@ -171,7 +167,7 @@ fn build_contract(contract_path: &PathBuf, is_json: bool) -> bool {
     }
 }
 
-fn find_wasm_file(contract_path: &PathBuf) -> Option<PathBuf> {
+fn find_wasm_file(contract_path: &Path) -> Option<PathBuf> {
     let target_dir = contract_path.join("target/wasm32-unknown-unknown/release");
 
     if target_dir.exists() {
@@ -196,7 +192,7 @@ fn deploy_contract(config: &DeploymentConfig, is_json: bool) -> Result<String, S
     }
 
     let output = Command::new("soroban")
-        .args(&[
+        .args([
             "contract",
             "deploy",
             "--wasm",
@@ -210,9 +206,7 @@ fn deploy_contract(config: &DeploymentConfig, is_json: bool) -> Result<String, S
         .map_err(|e| format!("Failed to deploy: {}", e))?;
 
     if output.status.success() {
-        let contract_id = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
+        let contract_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok(contract_id)
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
@@ -231,7 +225,7 @@ fn validate_deployment(contract_id: &str, network: &str, is_json: bool) -> anyho
 
     // Invoke health check
     let output = Command::new("soroban")
-        .args(&[
+        .args([
             "contract",
             "invoke",
             "--id",

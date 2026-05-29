@@ -12,10 +12,6 @@ keywords = ["soroban", "stellar", "security", "cli", "analysis"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 
-[features]
-default = []
-smt = ["sanctifier-core/smt"]
-
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
 clap_complete = "4.4"

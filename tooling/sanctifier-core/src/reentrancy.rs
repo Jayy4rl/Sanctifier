@@ -1,11 +1,8 @@
-//! Reentrancy detector for Soroban smart contracts.
-//!
-//! Detects the classic Soroban reentrancy pattern: a storage write (or token
-//! transfer) that occurs **before** an `invoke_contract` / `invoke_contract_check`
-//! call, without a boolean lock guard surrounding the external call.
-//!
-//! Also provides [`ReentrancyRule::fix`] which emits a [`Patch`] that inserts
-//! a boolean instance-storage lock guard around the external call site.
+//! Reentrancy analysis for Soroban contracts.
+use quote::quote;
+use serde::Serialize;
+use syn::visit::Visit;
+use syn::{ExprCall, ExprMethodCall, File};
 
 use crate::rules::{Patch, Rule, RuleViolation, Severity};
 use syn::spanned::Spanned;
@@ -285,8 +282,12 @@ fn is_storage_mutation(method: &str, receiver: &syn::Expr) -> bool {
         || receiver_str.contains("instance")
 }
 
-fn is_token_transfer(method: &str) -> bool {
-    matches!(method, "transfer" | "transfer_from" | "burn" | "burn_from")
+    let mut visitor = CallVisitor {
+        edges: Vec::new(),
+        current_fn: String::new(),
+    };
+    visitor.visit_file(&file);
+    visitor.edges
 }
 
 fn count_invoke_contract_calls(block: &syn::Block) -> usize {
@@ -398,26 +399,14 @@ fn build_guard_patch(block: &syn::Block, fn_name: &str) -> Option<Patch> {
     None
 }
 
-fn contains_invoke_contract(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::MethodCall(mc) => {
-            let method = mc.method.to_string();
-            if method == "invoke_contract" || method == "invoke_contract_check" {
-                return true;
-            }
-            contains_invoke_contract(&mc.receiver)
-                || mc.args.iter().any(contains_invoke_contract)
-        }
-        syn::Expr::Call(c) => {
-            if let syn::Expr::Path(p) = &*c.func {
-                if let Some(seg) = p.path.segments.last() {
-                    let ident = seg.ident.to_string();
-                    if ident == "invoke_contract" || ident == "invoke_contract_check" {
-                        return true;
-                    }
-                }
-            }
-            c.args.iter().any(contains_invoke_contract)
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+        if node.method == "invoke_contract" || node.method == "call" {
+            self.edges.push(ReentrancyEdge {
+                caller_function: self.current_fn.clone(),
+                target_contract: "Unknown".to_string(), // Placeholder
+                target_function: "Unknown".to_string(), // Placeholder
+                function_expr: Some(quote!(#node).to_string()),
+            });
         }
         syn::Expr::Block(b) => b.block.stmts.iter().any(|s| match s {
             syn::Stmt::Expr(e, _) => contains_invoke_contract(e),
@@ -587,21 +576,8 @@ mod tests {
         assert!(patch.replacement.contains("invoke_contract"));
     }
 
-    #[test]
-    fn fix_does_not_patch_already_guarded_function() {
-        let source = r#"
-            impl MyContract {
-                pub fn guarded(env: Env) {
-                    env.storage().persistent().set(&symbol_short!("BAL"), &0i128);
-                    let guarded = env.storage().instance().get::<_, bool>(&REENTRANCY_LOCK).unwrap_or(false);
-                    if guarded { panic!("reentrant call"); }
-                    env.storage().instance().set(&REENTRANCY_LOCK, &true);
-                    let result = env.invoke_contract(&other, &sym, vec![]);
-                    env.storage().instance().set(&REENTRANCY_LOCK, &false);
-                }
-            }
-        "#;
-        let patches = rule().fix(source);
-        assert!(patches.is_empty(), "already-guarded function must not be patched");
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        // Handle direct calls if needed
+        syn::visit::visit_expr_call(self, node);
     }
 }

@@ -13,8 +13,11 @@ mod logging;
 pub mod vulndb;
 
 #[derive(Parser)]
-#[command(name = "sanctifier")]
-#[command(version, about = "Stellar Soroban Security & Formal Verification Suite", long_about = None)]
+#[command(
+    name = "sanctifier",
+    version,
+    about = "Soroban smart contract security analyzer"
+)]
 struct Cli {
     /// Disable coloured output (also respects NO_COLOR env var)
     #[arg(long, global = true)]
