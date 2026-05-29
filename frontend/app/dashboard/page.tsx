@@ -17,6 +17,7 @@ import {
   SAMPLE_JSON,
 } from "../lib/report-ingestion";
 import { exportToPdf } from "../lib/export-pdf";
+import { copyShareLink, isShareLinkTooLarge } from "../lib/share-link";
 import { SeverityFilter } from "../components/SeverityFilter";
 import { FindingsList } from "../components/FindingsList";
 import { SummaryChart } from "../components/SummaryChart";
@@ -210,6 +211,19 @@ export default function DashboardPage() {
     setCodeFilterError(validateFindingCodeQuery(normalized));
   }, []);
 
+  const handleShareReport = async () => {
+    const workspace = selectedContract?.report
+      ? { workspace: "sanctifier", contracts: [{ name: selectedContract.name, total_findings: findings.length }], shared_libs: [], grand_total_findings: findings.length }
+      : null;
+    const data = workspace ?? currentReport;
+    if (!data) return;
+    if (isShareLinkTooLarge(data as Parameters<typeof copyShareLink>[0])) {
+      setError("Report is too large to share via URL. Export as PDF instead.");
+      return;
+    }
+    await copyShareLink(data as Parameters<typeof copyShareLink>[0]);
+  };
+
   const hasData = currentReport !== null;
   const isProcessing = isPending || isUploadingContract;
   const hasLoadedReport = jsonInput.trim().length > 0;
@@ -224,6 +238,7 @@ export default function DashboardPage() {
           handleFileUpload={handleFileUpload}
           onContractFiles={handleContractFiles}
           exportToPdf={() => exportToPdf(findings)}
+          shareReport={handleShareReport}
           hasData={hasData}
           isProcessing={isProcessing}
           uploadStatus={uploadStatus}
