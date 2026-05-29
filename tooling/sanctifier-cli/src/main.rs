@@ -62,8 +62,12 @@ pub enum Commands {
     },
     /// Apply auto-fix patches to a contract; use --interactive to review each patch
     Fix(commands::fix::FixArgs),
+    /// Explain a finding code (e.g. S001, S003) with details and remediation
+    Explain(commands::explain::ExplainArgs),
     /// Check for and download the latest Sanctifier binary
     Update,
+    /// Self-update with checksum verification via GitHub Releases
+    Upgrade(commands::upgrade::UpgradeArgs),
     /// Detect reentrancy vulnerabilities (state mutation before external call)
     Reentrancy(commands::reentrancy::ReentrancyArgs),
     /// Verify local source against on-chain bytecode
@@ -201,8 +205,14 @@ fn run() -> anyhow::Result<()> {
         Commands::Fix(args) => {
             commands::fix::exec(args)?;
         }
+        Commands::Explain(args) => {
+            commands::explain::exec(args)?;
+        }
         Commands::Update => {
             commands::update::exec()?;
+        }
+        Commands::Upgrade(args) => {
+            commands::upgrade::exec(args)?;
         }
         Commands::Reentrancy(args) => {
             commands::reentrancy::exec(args)?;
