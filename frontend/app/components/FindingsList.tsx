@@ -52,6 +52,7 @@ function FindingCard({ finding, onSelectAiFix }: FindingCardProps) {
             <h3 className="mt-1 font-medium">{finding.title}</h3>
             <button 
               onClick={() => onSelectAiFix(finding)}
+              aria-label="Get AI-powered fix suggestion for this finding"
               className="mt-1 flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
             >
               <Sparkles size={10} />
@@ -70,7 +71,7 @@ function FindingCard({ finding, onSelectAiFix }: FindingCardProps) {
           >
             {finding.severity}
           </span>
-          <span className="font-mono text-xs rounded border border-zinc-300/70 dark:border-zinc-600 px-2 py-1 text-zinc-700 dark:text-zinc-300 theme-high-contrast:border-white theme-high-contrast:text-white">
+          <span className="font-mono text-xs rounded border border-zinc-300/70 dark:border-zinc-600 px-2 py-1 text-zinc-700 dark:text-zinc-300 theme-high-contrast:border-white theme-high-contrast:text-white" aria-label={`Error code: ${finding.code}`}>
             {finding.code}
           </span>
         </div>
