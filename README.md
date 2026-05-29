@@ -248,6 +248,7 @@ Sanctifier is shipping in waves. What's done, what's next, what's wishlist:
 **Shipped**
 - 12 canonical analysis rules (S001–S012) with stable codes
 - CLI, GitHub Action, Web Dashboard, VS Code extension, WASM build
+- Off-chain anomaly detector for recorded runtime calls with Slack/Discord alerts
 - Live testnet runtime-guard contracts emitting on-chain audit events
 - SARIF + JSON output, draft-07 schema, badge generator
 - Diff mode, watch mode, cargo-workspace scan, patcher
@@ -270,6 +271,7 @@ Sanctifier is shipping in waves. What's done, what's next, what's wishlist:
 Sanctifier/
 ├── tooling/
 │   ├── sanctifier-cli/        # CLI binary (the one you install)
+│   ├── sanctifier-detector/   # Off-chain anomaly detection service
 │   ├── sanctifier-core/       # Static-analysis engine + Z3 backend
 │   └── sanctifier-wasm/       # Browser/Node WASM build of the engine
 ├── frontend/                  # Next.js dashboard, playground, terminal

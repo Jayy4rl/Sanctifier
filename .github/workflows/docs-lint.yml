@@ -5,13 +5,16 @@ on:
     paths:
       - "**/*.md"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   link-check:
     name: Markdown link integrity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check markdown links with lychee
         uses: lycheeverse/lychee-action@v2

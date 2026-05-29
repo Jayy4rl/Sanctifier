@@ -3190,6 +3190,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sanctifier-detector"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sanctifier-wasm"
 version = "0.2.0"
 dependencies = [
