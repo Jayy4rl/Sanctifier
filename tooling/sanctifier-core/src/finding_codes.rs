@@ -360,6 +360,10 @@ pub fn all_finding_codes() -> Vec<FindingCode> {
             code: DEPRECATED_SDK_USAGE,
             category: "sdk_migration",
             description: "Usage of a storage or deployment API removed or renamed in Soroban SDK v22 — bump(), RawVal, and deployer().deploy() must be migrated",
+            title: "Deprecated SDK Usage",
+            severity: FindingSeverity::High,
+            remediation: "Migrate bump() to extend_ttl(), replace RawVal with Val, and use new deploy patterns from the Environment",
+            doc_url: "https://github.com/HyperSafeD/Sanctifier/blob/main/docs/error-codes.md",
         },
     ]
 }

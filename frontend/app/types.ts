@@ -66,6 +66,7 @@ export interface UpgradeFinding {
   description: string;
   location: string;
   suggestion?: string;
+  severity?: string;
 }
 
 export interface SmtIssue {
@@ -142,6 +143,7 @@ export interface WorkspaceMember {
   name: string;
   total_findings: number;
   report?: AnalysisReport;
+  source?: string;
 }
 
 export interface WorkspaceSummary {

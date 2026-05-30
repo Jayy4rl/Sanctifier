@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useTransition } from "react";
+import { useState, useCallback, useMemo, useTransition, useEffect } from "react";
 import dynamic from "next/dynamic";
 import type { Severity } from "../types";
 import { transformReport, extractCallGraph, normalizeReport } from "../lib/transform";
@@ -8,7 +8,7 @@ import { normalizeFindingCodeQuery, validateFindingCodeQuery } from "../lib/find
 import { validateContractBatch } from "../lib/upload-validation";
 import type { RejectedFile } from "../lib/upload-validation";
 import type { FileProgress } from "../components/DashboardHeader";
-import type { WorkspaceSummary, AnalysisReport } from "../types";
+import type { WorkspaceSummary, AnalysisReport, Finding } from "../types";
 import {
   createWorkspaceFromSingleReport,
   extractErrorMessage,
@@ -27,6 +27,8 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { useWorkspace } from "../providers/WorkspaceProvider";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import { DashboardHeader } from "../components/DashboardHeader";
+import { getSettingsHeaders } from "../lib/settings";
+import { saveScanRecord, getScanHistory, clearScanHistory, type ScanRecord } from "../lib/scan-history";
 
 const CallGraph = dynamic(() => import("../components/CallGraph").then((m) => m.CallGraph), {
   ssr: false,
@@ -40,7 +42,7 @@ const CallGraph = dynamic(() => import("../components/CallGraph").then((m) => m.
 type Tab = "findings" | "callgraph" | "diff";
 
 export default function DashboardPage() {
-  const { selectedContract, setWorkspace, updateContractReport } = useWorkspace();
+  const { workspace, selectedContract, setWorkspace, updateContractReport } = useWorkspace();
   const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
   const [error, setError] = useState<string | null>(null);
   const [jsonInput, setJsonInput] = useState("");
@@ -54,8 +56,17 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [batchProgress, setBatchProgress] = useState<Record<string, FileProgress>>({});
   const [rejectedFiles, setRejectedFiles] = useState<RejectedFile[]>([]);
+  const [trendRecords, setTrendRecords] = useState<ScanRecord[]>([]);
+  const [sourceCache, setSourceCache] = useState<Record<string, string>>({});
 
   const currentReport = selectedContract?.report;
+  const currentContractName = selectedContract?.name ?? "default";
+
+  // Load trend data on mount and when workspace changes
+  useEffect(() => {
+    const wsName = workspace?.workspace ?? currentContractName;
+    getScanHistory(wsName).then(setTrendRecords).catch(() => {});
+  }, [workspace, currentContractName]);
 
   const { findings, nodes: callGraphNodes, edges: callGraphEdges } = useMemo(() => {
     if (!currentReport) {
@@ -82,26 +93,50 @@ export default function DashboardPage() {
     }
   }, [baselineJsonInput]);
 
-  const applyReport = useCallback((rawReport: unknown) => {
+  const applyReport = useCallback((rawReport: unknown, source?: string) => {
     startTransition(() => {
       if (isWorkspaceSummary(rawReport)) {
         setWorkspace(rawReport);
       } else {
-        setWorkspace(createWorkspaceFromSingleReport(rawReport));
+        const ws = createWorkspaceFromSingleReport(rawReport);
+        if (source && ws.contracts.length > 0) {
+          ws.contracts[0].source = source;
+        }
+        setWorkspace(ws);
       }
     });
   }, [setWorkspace]);
+
+  const persistScanRecord = useCallback((findingsList: Finding[]) => {
+    const wsName = workspace?.workspace ?? currentContractName;
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    findingsList.forEach((f) => {
+      if (counts[f.severity] !== undefined) counts[f.severity]++;
+    });
+    saveScanRecord({
+      workspace: wsName,
+      timestamp: Date.now(),
+      ...counts,
+      total: findingsList.length,
+    }).then(() => {
+      getScanHistory(wsName).then(setTrendRecords).catch(() => {});
+    }).catch(() => {});
+  }, [workspace, currentContractName]);
 
   const parseReport = useCallback((text: string) => {
     setError(null);
     setUploadStatus(null);
     try {
-      applyReport(parseJsonInput(text));
+      const parsed = parseJsonInput(text);
+      applyReport(parsed);
+      const report = normalizeReport(parsed);
+      const findingsList = transformReport(report);
+      persistScanRecord(findingsList);
     } catch (e) {
       setError("Invalid JSON");
       setWorkspace(null);
     }
-  }, [applyReport, setWorkspace]);
+  }, [applyReport, persistScanRecord, setWorkspace]);
 
   const loadReport = useCallback(() => {
     parseReport(jsonInput);
@@ -120,18 +155,40 @@ export default function DashboardPage() {
     e.target.value = "";
   }, [parseReport]);
 
-  const analyzeFile = useCallback(async (file: File): Promise<unknown> => {
+  const analyzeFile = useCallback(async (file: File): Promise<{ payload: unknown; source: string }> => {
     const formData = new FormData();
     formData.append("contract", file);
-    const response = await fetch("/api/analyze", { method: "POST", body: formData });
+    const settingsHeaders = getSettingsHeaders();
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      body: formData,
+      headers: settingsHeaders as Record<string, string>,
+    });
     const rawBody = await response.text();
     let payload: unknown = null;
     if (rawBody) {
       try { payload = JSON.parse(rawBody); } catch { payload = rawBody; }
     }
     if (!response.ok) throw new Error(extractErrorMessage(payload, "Contract analysis failed"));
-    return payload;
+    // Read the source from the File object
+    const source = await file.text();
+    return { payload, source };
   }, []);
+
+  const getSourceForFinding = useCallback((finding: Finding): string | undefined => {
+    const contractName = workspace?.contracts.find(
+      (c) => c.source && (finding.location.includes(c.name) || finding.location === c.name)
+    )?.name;
+    if (contractName && sourceCache[contractName]) {
+      return sourceCache[contractName];
+    }
+    // Fall back to selected contract's source
+    return selectedContract?.source;
+  }, [workspace, selectedContract, sourceCache]);
+
+  const getFileNameForFinding = useCallback((finding: Finding): string | undefined => {
+    return selectedContract?.name ?? "contract.rs";
+  }, [selectedContract]);
 
   const handleContractFiles = useCallback(async (files: File[]) => {
     const { valid, rejected } = validateContractBatch(files);
@@ -151,9 +208,14 @@ export default function DashboardPage() {
       setBatchProgress({ [file.name]: "analyzing" });
       setUploadStatus(`Analyzing ${file.name}…`);
       try {
-        const payload = await analyzeFile(file);
+        const { payload, source } = await analyzeFile(file);
+        setSourceCache((prev) => ({ ...prev, [file.name]: source }));
         setJsonInput(JSON.stringify(payload, null, 2));
-        applyReport(payload);
+        applyReport(payload, source);
+        // Persist scan record for trend chart
+        const report = normalizeReport(payload);
+        const transformedFindings = transformReport(report);
+        persistScanRecord(transformedFindings);
         setBatchProgress({ [file.name]: "done" });
         setUploadStatus(`Analysis report ready for ${file.name}.`);
       } catch (err) {
@@ -174,7 +236,7 @@ export default function DashboardPage() {
 
     const skeleton: WorkspaceSummary = {
       workspace: "batch-upload",
-      contracts: valid.map((f) => ({ name: f.name, total_findings: 0 })),
+      contracts: valid.map((f) => ({ name: f.name, total_findings: 0, source: "" })),
       shared_libs: [],
       grand_total_findings: 0,
     };
@@ -182,12 +244,14 @@ export default function DashboardPage() {
 
     let doneCount = 0;
     let errorCount = 0;
+    const newSourceCache: Record<string, string> = {};
 
     await Promise.all(
       valid.map(async (file) => {
         setBatchProgress((prev) => ({ ...prev, [file.name]: "analyzing" }));
         try {
-          const payload = await analyzeFile(file);
+          const { payload, source } = await analyzeFile(file);
+          newSourceCache[file.name] = source;
           const report = normalizeReport(payload);
           updateContractReport(file.name, report);
           setBatchProgress((prev) => ({ ...prev, [file.name]: "done" }));
@@ -199,11 +263,19 @@ export default function DashboardPage() {
       })
     );
 
+    setSourceCache((prev) => ({ ...prev, ...newSourceCache }));
     setIsUploadingContract(false);
     setUploadStatus(
       `Batch complete: ${doneCount} analyzed${errorCount > 0 ? `, ${errorCount} failed` : ""}.`
     );
-  }, [analyzeFile, applyReport, setWorkspace, updateContractReport]);
+  }, [analyzeFile, applyReport, setWorkspace, updateContractReport, persistScanRecord]);
+
+  const handleClearHistory = useCallback(() => {
+    const wsName = workspace?.workspace ?? currentContractName;
+    clearScanHistory(wsName).then(() => {
+      setTrendRecords([]);
+    }).catch(() => {});
+  }, [workspace, currentContractName]);
 
   const handleCodeFilterChange = useCallback((input: string) => {
     const normalized = normalizeFindingCodeQuery(input);
@@ -275,7 +347,11 @@ export default function DashboardPage() {
                     <SanctityScore findings={findings} />
                   </ErrorBoundary>
                   <ErrorBoundary>
-                    <SummaryChart findings={findings} />
+                    <SummaryChart
+                      findings={findings}
+                      trendRecords={trendRecords}
+                      onClearHistory={handleClearHistory}
+                    />
                   </ErrorBoundary>
                 </section>
 
@@ -362,6 +438,8 @@ export default function DashboardPage() {
                           findings={findings}
                           severityFilter={severityFilter}
                           codeFilter={codeFilterError ? "" : codeFilterInput}
+                          getSource={getSourceForFinding}
+                          getFileName={getFileNameForFinding}
                         />
                       </ErrorBoundary>
                     </section>

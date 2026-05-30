@@ -155,6 +155,7 @@ pub struct UpgradeFinding {
     pub location: String,
     pub message: String,
     pub suggestion: String,
+    pub severity: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -743,6 +744,7 @@ impl Analyzer {
                                         fn_name
                                     ),
                                     suggestion: "Add require_auth or require_auth_for_args before state mutations".to_string(),
+                                    severity: "high".to_string(),
                                 });
                                 report.suggestions.push(format!(
                                     "Ensure '{}' requires admin authorization",
@@ -754,12 +756,20 @@ impl Analyzer {
                         // Init pattern detection
                         if is_init_fn(&fn_name) {
                             report.init_functions.push(fn_name.clone());
+                            let has_guard = fn_has_reinit_guard(&f.block);
+                            let severity_str = if has_guard { "medium".to_string() } else { "critical".to_string() };
+                            let message = if has_guard {
+                                format!("Initialization function '{}' detected (with re-init guard)", fn_name)
+                            } else {
+                                format!("Initialization function '{}' is callable more than once — add re-init guard", fn_name)
+                            };
                             report.findings.push(UpgradeFinding {
                                 category: UpgradeCategory::InitPattern,
                                 function_name: Some(fn_name.clone()),
                                 location: location.clone(),
-                                message: format!("Initialization function '{}' detected", fn_name),
-                                suggestion: "Ensure init is only callable once; consider using a flag in storage".to_string(),
+                                message,
+                                suggestion: "Guard init with an early return when storage already has an initialization flag: if env.storage().instance().has(&DataKey::IsInit) { return; }".to_string(),
+                                severity: severity_str,
                             });
                         }
 
@@ -777,6 +787,7 @@ impl Analyzer {
                                 ),
                                 suggestion: "Verify timelock delay is enforced before upgrade"
                                     .to_string(),
+                                    severity: "medium".to_string(),
                             });
                         }
                     }
@@ -1699,4 +1710,99 @@ fn is_string_literal(expr: &syn::Expr) -> bool {
             ..
         })
     )
+}
+
+/// Check if a function body contains an early-return guard against re-initialization.
+/// Looks for a pattern where storage is queried (via `.has()`, `.get()`, or `.try_get()`)
+/// and an early exit (`return` or `panic!`) follows before the main init logic.
+fn fn_has_reinit_guard(block: &syn::Block) -> bool {
+    for stmt in &block.stmts {
+        match stmt {
+            syn::Stmt::Expr(expr, _) => {
+                if expr_has_storage_guard(expr) {
+                    return true;
+                }
+            }
+            syn::Stmt::Local(local) => {
+                if let Some(init) = &local.init {
+                    if expr_has_storage_guard(&init.expr) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Recursively check if an expression contains a storage guard pattern.
+/// A storage guard is an `if` whose condition calls `.has()`, `.get()`, or `.try_get()`
+/// on a storage API, and whose branch contains a `return` or `panic!`.
+fn expr_has_storage_guard(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::If(i) => {
+            let cond_str = quote::quote!(#i.cond).to_string();
+            let has_storage_check = cond_str.contains(".has(")
+                || cond_str.contains(".get(")
+                || cond_str.contains(".try_get(");
+            if !has_storage_check {
+                // Check sub-expressions recursively
+                return expr_has_storage_guard(&i.cond)
+                    || block_has_early_exit(&i.then_branch);
+            }
+            // Check if either branch has an early return/panic
+            if block_has_early_exit(&i.then_branch) {
+                return true;
+            }
+            if let Some((_, else_expr)) = &i.else_branch {
+                if expr_has_early_exit(else_expr) {
+                    return true;
+                }
+            }
+            true // storage check found — treat as guarded regardless of branch content
+        }
+        syn::Expr::Block(b) => fn_has_reinit_guard(&b.block),
+        syn::Expr::Unary(u) => expr_has_storage_guard(&u.expr),
+        syn::Expr::Paren(p) => expr_has_storage_guard(&p.expr),
+        syn::Expr::Binary(b) => {
+            expr_has_storage_guard(&b.left) || expr_has_storage_guard(&b.right)
+        }
+        _ => false,
+    }
+}
+
+fn block_has_early_exit(block: &syn::Block) -> bool {
+    for stmt in &block.stmts {
+        match stmt {
+            syn::Stmt::Expr(expr, _) => {
+                if expr_has_early_exit(expr) {
+                    return true;
+                }
+            }
+            syn::Stmt::Macro(m) => {
+                if m.mac.path.is_ident("panic") {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn expr_has_early_exit(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::Return(_) => true,
+        syn::Expr::Macro(m) => m.mac.path.is_ident("panic"),
+        syn::Expr::Block(b) => block_has_early_exit(&b.block),
+        syn::Expr::If(i) => {
+            block_has_early_exit(&i.then_branch)
+                || i.else_branch
+                    .as_ref()
+                    .map(|(_, e)| expr_has_early_exit(e))
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
 }

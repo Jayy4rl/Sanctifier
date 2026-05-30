@@ -14,6 +14,16 @@ const SUPPORTED_SOURCE_EXTENSIONS = new Set([".rs"]);
 const MAX_FILE_SIZE_BYTES = 250 * 1024;
 const EXECUTION_TIMEOUT_MS = 30000;
 
+function getSettingsFromHeaders(request: NextRequest): {
+  binPath?: string;
+  customRulesPath?: string;
+} {
+  const binPath = request.headers.get("x-sanctifier-bin-path") || undefined;
+  const customRulesPath =
+    request.headers.get("x-sanctifier-custom-rules") || undefined;
+  return { binPath, customRulesPath };
+}
+
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 function getClientIP(request: NextRequest): string {
@@ -61,16 +71,21 @@ type ProcessResult = {
   exitCode: number | null;
 };
 
-function runAnalyzeCommand(contractPath: string, timeoutMs: number): Promise<ProcessResult> {
+function runAnalyzeCommand(
+  contractPath: string,
+  timeoutMs: number,
+  settings?: { binPath?: string; customRulesPath?: string }
+): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
-    const cliProcess = spawn(
-      SANCTIFIER_BIN,
-      ["analyze", "--format", "json", contractPath],
-      {
+    const bin = settings?.binPath || SANCTIFIER_BIN;
+    const args = ["analyze", "--format", "json", contractPath];
+    if (settings?.customRulesPath) {
+      args.push("--custom-rules", settings.customRulesPath);
+    }
+    const cliProcess = spawn(bin, args, {
       cwd: REPO_ROOT,
       env: { ...process.env, FORCE_COLOR: "0" },
-      }
-    );
+    });
     let stdout = "";
     let stderr = "";
     let timeoutId: NodeJS.Timeout | null = null;
@@ -260,6 +275,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const settingsFromHeaders = getSettingsFromHeaders(request);
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "sanctifier-contract-"));
   try {
     const contentType = request.headers.get("content-type") ?? "";
@@ -308,7 +324,7 @@ export async function POST(request: NextRequest) {
     const contractPath = path.join(tempDir, sourcePayload.fileName);
     await writeFile(contractPath, sourcePayload.source, "utf8");
 
-    const { stdout, stderr, exitCode } = await runAnalyzeCommand(contractPath, EXECUTION_TIMEOUT_MS);
+    const { stdout, stderr, exitCode } = await runAnalyzeCommand(contractPath, EXECUTION_TIMEOUT_MS, settingsFromHeaders);
     const report = parseJsonResponse(stdout);
 
     if (report) {

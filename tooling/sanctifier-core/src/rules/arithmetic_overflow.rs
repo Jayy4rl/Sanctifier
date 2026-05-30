@@ -196,14 +196,28 @@ impl<'ast> Visit<'ast> for ArithVisitor {
         self.index_depth -= 1;
     }
 
-
-                            }
+    fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
+        if self.index_depth == 0 {
+            if let Some(fn_name) = self.current_fn.clone() {
+                if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
+                    if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                        let key = (fn_name.clone(), op_str.to_string());
+                        if !self.seen.contains(&key) {
+                            self.seen.insert(key);
+                            let line = node.left.span().start().line;
+                            self.issues.push(ArithmeticIssue {
+                                function_name: fn_name.clone(),
+                                operation: op_str.to_string(),
+                                suggestion: suggestion.to_string(),
+                                location: format!("{}:{}", fn_name, line),
+                            });
                         }
                     }
                 }
             }
-            syn::visit::visit_expr_binary(self, node);
         }
+        syn::visit::visit_expr_binary(self, node);
+    }
 
     fn visit_expr_assign_op(&mut self, node: &'ast syn::ExprAssignOp) {
         if self.index_depth == 0 {
@@ -450,8 +464,6 @@ mod tests {
             0,
             "index subscript arithmetic must be skipped"
         );
-    }
-
     }
 }
 
