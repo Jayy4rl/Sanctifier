@@ -813,3 +813,140 @@ fn test_ndjson_clean_file_emits_done() {
     assert_eq!(done["event"], "done");
     assert_eq!(done["total_findings"], 0);
 }
+
+/// Test S029: require_auth_for_args rule detection
+#[test]
+fn test_s029_require_auth_for_args_detection() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("s029_test.rs");
+    
+    // Write a contract with vulnerable require_auth usage
+    fs::write(
+        &contract,
+        r#"
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct TestContract;
+
+#[contractimpl]
+impl TestContract {
+    /// VULNERABLE: Multi-arg function using require_auth instead of require_auth_for_args
+    pub fn set_admin(env: Env, caller: Address, new_admin: Address) {
+        caller.require_auth();
+        env.storage().instance().set(&symbol_short!("admin"), &new_admin);
+    }
+
+    /// SAFE: Uses require_auth_for_args
+    pub fn set_admin_safe(env: Env, caller: Address, new_admin: Address) {
+        caller.require_auth_for_args((new_admin.clone(),).into_val(&env));
+        env.storage().instance().set(&symbol_short!("admin"), &new_admin);
+    }
+
+    /// SAFE: Single Address parameter
+    pub fn set_owner(env: Env, owner: Address) {
+        owner.require_auth();
+        env.storage().instance().set(&symbol_short!("owner"), &owner);
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["analyze", "--format", "json"])
+        .arg(&contract)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: Value = serde_json::from_str(&stdout).unwrap();
+
+    // Check that we found the require_auth_for_args violation
+    let violations = json["rule_violations"].as_array().unwrap();
+    let s029_violations: Vec<&Value> = violations
+        .iter()
+        .filter(|v| v["rule_name"] == "require_auth_for_args")
+        .collect();
+
+    assert_eq!(
+        s029_violations.len(),
+        1,
+        "Expected exactly 1 require_auth_for_args violation"
+    );
+
+    let violation = s029_violations[0];
+    assert_eq!(violation["severity"], "Error");
+    assert!(
+        violation["message"]
+            .as_str()
+            .unwrap()
+            .contains("require_auth_for_args"),
+        "Message should mention require_auth_for_args"
+    );
+    assert!(
+        violation["location"].as_str().unwrap().contains("set_admin"),
+        "Violation should be in set_admin function"
+    );
+}
+
+/// Test S029 with NDJSON format
+#[test]
+fn test_s029_ndjson_format() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("s029_ndjson.rs");
+    
+    fs::write(
+        &contract,
+        r#"
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct VulnerableContract;
+
+#[contractimpl]
+impl VulnerableContract {
+    pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        spender.require_auth();
+        env.storage().instance().set(&symbol_short!("balance"), &amount);
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["analyze", "--format", "ndjson"])
+        .arg(&contract)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let finding_lines: Vec<Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .filter(|v: &Value| v["event"] == "finding")
+        .collect();
+
+    let s029_findings: Vec<&Value> = finding_lines
+        .iter()
+        .filter(|v| v["rule"] == "require_auth_for_args")
+        .collect();
+
+    assert!(
+        !s029_findings.is_empty(),
+        "Should detect require_auth_for_args violation in transfer_from"
+    );
+
+    let finding = s029_findings[0];
+    assert_eq!(finding["severity"], "Error");
+    assert!(
+        finding["message"]
+            .as_str()
+            .unwrap()
+            .contains("3 Address parameters"),
+        "Should mention 3 Address parameters"
+    );
+}

@@ -81,6 +81,8 @@ pub const STATIC_REENTRANCY: &str = "S027";
 pub const DEPRECATED_SDK_USAGE: &str = "S028";
 /// Use of env.ledger().timestamp() as entropy for randomness.
 pub const TIMESTAMP_RANDOMNESS: &str = "S029";
+/// require_auth used instead of require_auth_for_args in multi-arg admin operations, enabling replay/scope-confusion attacks.
+pub const REQUIRE_AUTH_FOR_ARGS: &str = "S030";
 
 /// A single finding-code entry with machine-readable code, category, and
 /// human-readable description.
@@ -376,6 +378,15 @@ pub fn all_finding_codes() -> Vec<FindingCode> {
             remediation: "Never use env.ledger().timestamp() as a sole source of randomness. Use a VRF oracle or combine multiple unpredictable entropy sources",
             doc_url: "https://github.com/HyperSafeD/Sanctifier/blob/main/docs/rules/unsafe-prng.md",
         },
+        FindingCode {
+            code: REQUIRE_AUTH_FOR_ARGS,
+            category: "authentication",
+            description: "Function with multiple Address parameters uses require_auth instead of require_auth_for_args, enabling replay/scope-confusion attacks on multi-arg admin operations",
+            title: "Missing require_auth_for_args",
+            severity: FindingSeverity::High,
+            remediation: "Replace require_auth() with require_auth_for_args() to bind authorization to the exact call payload, preventing replay attacks across different argument combinations",
+            doc_url: "https://github.com/HyperSafeD/Sanctifier/blob/main/docs/rules/require-auth-for-args.md",
+        },
     ]
 }
 
@@ -418,5 +429,6 @@ mod tests {
         assert!(codes.iter().any(|c| c.code == STATIC_REENTRANCY));
         assert!(codes.iter().any(|c| c.code == DEPRECATED_SDK_USAGE));
         assert!(codes.iter().any(|c| c.code == TIMESTAMP_RANDOMNESS));
+        assert!(codes.iter().any(|c| c.code == REQUIRE_AUTH_FOR_ARGS));
     }
 }

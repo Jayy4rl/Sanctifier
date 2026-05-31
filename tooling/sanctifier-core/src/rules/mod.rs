@@ -52,6 +52,8 @@ pub mod static_reentrancy;
 pub mod deprecated_sdk_usage;
 /// Detect env.ledger().timestamp() used as entropy for randomness.
 pub mod timestamp_randomness;
+/// require_auth used instead of require_auth_for_args in multi-arg admin operations.
+pub mod require_auth_for_args;
 use serde::Serialize;
 use std::any::Any;
 
@@ -221,6 +223,7 @@ impl RuleRegistry {
         registry.register(static_reentrancy::StaticReentrancyRule::new());
         registry.register(deprecated_sdk_usage::DeprecatedSdkUsageRule::new());
         registry.register(timestamp_randomness::TimestampRandomnessRule::new());
+        registry.register(require_auth_for_args::RequireAuthForArgsRule::new());
         registry
     }
 }
