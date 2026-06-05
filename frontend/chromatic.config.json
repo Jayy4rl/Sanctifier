@@ -12,6 +12,5 @@
   "ignoreLastBuildOnBranch": "main",
   "onlyChanged": true,
   "traceChanged": "expanded",
-  "diagnostics": false,
   "zip": true
 }

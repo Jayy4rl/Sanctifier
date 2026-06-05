@@ -436,14 +436,12 @@ impl Analyzer {
                         self.check_expr_panics(&init.expr, fn_name, issues);
                     }
                 }
-                syn::Stmt::Macro(m) => {
-                    if m.mac.path.is_ident("panic") {
-                        issues.push(PanicIssue {
-                            function_name: fn_name.to_string(),
-                            issue_type: "panic!".to_string(),
-                            location: fn_name.to_string(),
-                        });
-                    }
+                syn::Stmt::Macro(m) if m.mac.path.is_ident("panic") => {
+                    issues.push(PanicIssue {
+                        function_name: fn_name.to_string(),
+                        issue_type: "panic!".to_string(),
+                        location: fn_name.to_string(),
+                    });
                 }
                 _ => {}
             }
@@ -452,14 +450,12 @@ impl Analyzer {
 
     fn check_expr_panics(&self, expr: &syn::Expr, fn_name: &str, issues: &mut Vec<PanicIssue>) {
         match expr {
-            syn::Expr::Macro(m) => {
-                if m.mac.path.is_ident("panic") {
-                    issues.push(PanicIssue {
-                        function_name: fn_name.to_string(),
-                        issue_type: "panic!".to_string(),
-                        location: fn_name.to_string(),
-                    });
-                }
+            syn::Expr::Macro(m) if m.mac.path.is_ident("panic") => {
+                issues.push(PanicIssue {
+                    function_name: fn_name.to_string(),
+                    issue_type: "panic!".to_string(),
+                    location: fn_name.to_string(),
+                });
             }
             syn::Expr::MethodCall(m) => {
                 let method_name = m.method.to_string();
@@ -618,19 +614,17 @@ impl Analyzer {
 
         for item in &file.items {
             match item {
-                Item::Struct(s) => {
-                    if has_contracttype(&s.attrs) {
-                        let size = self.estimate_struct_size(s);
-                        if let Some(level) =
-                            classify_size(size, limit, approaching, strict, strict_threshold)
-                        {
-                            warnings.push(SizeWarning {
-                                struct_name: s.ident.to_string(),
-                                estimated_size: size,
-                                limit,
-                                level,
-                            });
-                        }
+                Item::Struct(s) if has_contracttype(&s.attrs) => {
+                    let size = self.estimate_struct_size(s);
+                    if let Some(level) =
+                        classify_size(size, limit, approaching, strict, strict_threshold)
+                    {
+                        warnings.push(SizeWarning {
+                            struct_name: s.ident.to_string(),
+                            estimated_size: size,
+                            limit,
+                            level,
+                        });
                     }
                 }
                 Item::Enum(e) if has_contracttype(&e.attrs) => {
