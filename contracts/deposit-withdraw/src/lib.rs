@@ -165,9 +165,9 @@ impl DepositWithdraw {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, MockAuth, MockAuthInvoke},
+        testutils::Address as _,
         token::{Client as TokenClient, StellarAssetClient},
-        Env, IntoVal,
+        Env,
     };
 
     fn setup() -> (Env, Address, Address, Address, Address) {
@@ -178,7 +178,7 @@ mod tests {
         let token_addr = env
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
-        let contract_id = env.register(DepositWithdraw, ());
+        let contract_id = env.register_contract(None, DepositWithdraw);
         let user = Address::generate(&env);
 
         StellarAssetClient::new(&env, &token_addr).mint(&user, &10_000i128);
