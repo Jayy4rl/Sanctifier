@@ -328,7 +328,7 @@ export async function getExplanation(
   return { ...result, cached: false };
 }
 
-export function* streamExplanation(
+export async function* streamExplanation(
   finding: Finding,
   ip: string,
 ): AsyncGenerator<string> {
@@ -341,5 +341,5 @@ export function* streamExplanation(
     throw new Error("Streaming not supported by current provider");
   }
 
-  return provider.explainStream(finding);
+  yield* provider.explainStream(finding);
 }
