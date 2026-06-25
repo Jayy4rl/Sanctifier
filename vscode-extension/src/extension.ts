@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import { analyzeSorobanSource, looksLikeSorobanSource, type EditorFinding } from './analyzer';
 import { analyzeSorobanSource, looksLikeSorobanSource, filterBySeverity, type Severity } from './analyzer';
 import { type EditorFinding, type SanctifierExtensionApi } from './types';
 import { folderLooksLikeSorobanProject, invalidateWorkspaceCache } from './workspace';
@@ -45,6 +47,20 @@ function findingToDiagnostic(doc: vscode.TextDocument, f: EditorFinding): vscode
   return d;
 }
 
+function validateSanctifierPath(exePath: string): void {
+  const trimmed = exePath.trim();
+  if (!trimmed) {
+    return;
+  }
+  if (!fs.existsSync(trimmed)) {
+    vscode.window.showWarningMessage(
+      `Sanctifier: sanctifierPath "${trimmed}" was not found on disk. ` +
+        'Update sanctifier.sanctifierPath to a valid CLI binary path.',
+    );
+  }
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
 export async function activate(context: vscode.ExtensionContext): Promise<SanctifierExtensionApi> {
   const collection = vscode.languages.createDiagnosticCollection(SOURCE);
   const outputChannel = vscode.window.createOutputChannel('Sanctifier');
@@ -73,6 +89,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
     statusBar.text = total > 0 ? `$(shield) Sanctifier: ${total}` : '$(shield) Sanctifier';
     statusBar.show();
   }
+
+  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  statusBar.text = '$(shield) Sanctifier';
+  statusBar.tooltip = 'Sanctifier: Soroban security analysis active';
+  statusBar.show();
+  context.subscriptions.push(statusBar);
 
   const debouncers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -105,6 +127,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
     const allFindings = analyzeSorobanSource(text);
     const findings = filterBySeverity(allFindings, minSeverity);
 
+    statusBar.text = '$(sync~spin) Sanctifier: analyzing…';
+    const findings = analyzeSorobanSource(text);
+    const diags = findings.map((f) => findingToDiagnostic(doc, f));
+    collection.set(doc.uri, diags);
+    statusBar.text =
+      diags.length > 0
+        ? `$(shield) Sanctifier (${diags.length} hint${diags.length === 1 ? '' : 's'})`
+        : '$(shield) Sanctifier';
     findingsCache.set(doc.uri.toString(), findings);
     const diags = findings.map((f) => findingToDiagnostic(doc, f));
     collection.set(doc.uri, diags);
@@ -122,7 +152,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
         return;
       }
     }
-    const ms = getConfig().get<number>('debounceMs') ?? 400;
+    const ms = Math.min(5000, Math.max(100, getConfig().get<number>('debounceMs') ?? 400));
     const key = doc.uri.toString();
     const prev = debouncers.get(key);
     if (prev) {
@@ -175,6 +205,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('sanctifier')) {
+        sorobanWorkspaceCache = null;
+        if (e.affectsConfiguration('sanctifier.sanctifierPath')) {
+          validateSanctifierPath(getConfig().get<string>('sanctifierPath') ?? '');
+        }
         invalidateWorkspaceCache();
         contentCache.clear();
         findingsCache.clear();
@@ -213,7 +247,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
       const exe = getConfig().get<string>('sanctifierPath')?.trim();
       if (!exe) {
         vscode.window.showWarningMessage(
-          'Set sanctifier.sanctifierPath to your sanctifier CLI binary, then run again.'
+          'Set sanctifier.sanctifierPath to your sanctifier CLI binary, then run again.',
+        );
+        return;
+      }
+      if (!fs.existsSync(exe)) {
+        vscode.window.showErrorMessage(
+          `Sanctifier: binary not found at "${exe}". ` +
+            'Update sanctifier.sanctifierPath to a valid path and try again.',
         );
         return;
       }
@@ -222,6 +263,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
         vscode.window.showErrorMessage('Open a folder to analyze.');
         return;
       }
+      statusBar.text = '$(sync~spin) Sanctifier: running full scan…';
+      const { output, stderr } = await new Promise<{ output: string | undefined; stderr: string }>(
+        (resolve) => {
+          const p = spawn(exe, ['analyze', folder.uri.fsPath, '--format', 'json'], {
+            cwd: folder.uri.fsPath,
+          });
+          let out = '';
+          let err = '';
+          p.stdout.on('data', (b: Buffer) => (out += b.toString()));
+          p.stderr.on('data', (b: Buffer) => (err += b.toString()));
+          p.on('close', () => resolve({ output: out || undefined, stderr: err }));
+          p.on('error', () => resolve({ output: undefined, stderr: '' }));
+        },
+      );
+      statusBar.text = '$(shield) Sanctifier';
+      if (!output) {
+        const isWasmFailure =
+          /wasm32|wasm-unknown|target.*wasm|error\[E/i.test(stderr);
+        if (isWasmFailure) {
+          const choice = await vscode.window.showErrorMessage(
+            'Sanctifier: WASM compilation failed. ' +
+              'Ensure the wasm32 target is installed: `rustup target add wasm32-unknown-unknown`.',
+            'Show Error Output',
+          );
+          if (choice === 'Show Error Output') {
+            const errDoc = await vscode.workspace.openTextDocument({
+              content: stderr,
+              language: 'text',
+            });
+            await vscode.window.showTextDocument(errDoc, { preview: true });
+          }
+        } else {
+          vscode.window.showErrorMessage(
+            'Sanctifier CLI failed or produced no output. ' +
+              'Check sanctifier.sanctifierPath and ensure the binary is executable.',
+          );
+        }
+        return;
+      }
+      const token = output;
+      const doc = await vscode.workspace.openTextDocument({
+        content: token,
+        language: 'json',
+      });
+      await vscode.window.showTextDocument(doc, { preview: true });
 
       // Remote workspaces (SSH, Codespaces, WSL) use non-file URIs; the CLI
       // must run on the same machine as the source files.
