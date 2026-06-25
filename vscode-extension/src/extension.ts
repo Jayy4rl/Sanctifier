@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { analyzeSorobanSource, looksLikeSorobanSource, type EditorFinding } from './analyzer';
+import { findingsToSarif, parseSarif, serialiseSarif, validateSarifShape, sarifToFindings } from './sarif';
+import { validateSarifContent, validateSarifResultCount, isPathWithinWorkspace, MAX_SARIF_BYTES } from './security';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { analyzeSorobanSource, looksLikeSorobanSource, filterBySeverity, type Severity } from './analyzer';
 import { type EditorFinding, type SanctifierExtensionApi } from './types';
 import { folderLooksLikeSorobanProject, invalidateWorkspaceCache } from './workspace';
@@ -335,6 +340,96 @@ export async function activate(context: vscode.ExtensionContext): Promise<Sancti
         language: 'json',
       });
       await vscode.window.showTextDocument(doc, { preview: true });
+    }),
+
+    vscode.commands.registerCommand('sanctifier.exportSarif', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'rust') {
+        vscode.window.showWarningMessage('Open a Rust file to export its findings as SARIF.');
+        return;
+      }
+      const text = editor.document.getText();
+      if (Buffer.byteLength(text, 'utf8') > MAX_SARIF_BYTES) {
+        vscode.window.showErrorMessage('File is too large to analyse for SARIF export.');
+        return;
+      }
+      const findings: EditorFinding[] = analyzeSorobanSource(text);
+      const fileUri = editor.document.uri.fsPath;
+      const sarifLog = findingsToSarif(findings, vscode.Uri.file(fileUri).toString());
+      const content = serialiseSarif(sarifLog);
+
+      const defaultUri = vscode.Uri.file(path.join(path.dirname(fileUri), 'sanctifier.sarif'));
+      const dest = await vscode.window.showSaveDialog({
+        defaultUri,
+        filters: { 'SARIF files': ['sarif', 'json'], 'All files': ['*'] },
+        title: 'Export Sanctifier findings as SARIF',
+      });
+      if (!dest) return;
+
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (folder && !isPathWithinWorkspace(folder.uri.fsPath, dest.fsPath)) {
+        vscode.window.showErrorMessage('Cannot export outside the current workspace.');
+        return;
+      }
+
+      fs.writeFileSync(dest.fsPath, content, 'utf8');
+      const open = await vscode.window.showInformationMessage(
+        `SARIF exported: ${path.basename(dest.fsPath)}`,
+        'Open'
+      );
+      if (open === 'Open') {
+        const doc = await vscode.workspace.openTextDocument(dest);
+        await vscode.window.showTextDocument(doc, { preview: true });
+      }
+    }),
+
+    vscode.commands.registerCommand('sanctifier.importSarif', async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: { 'SARIF files': ['sarif', 'json'], 'All files': ['*'] },
+        title: 'Import SARIF file',
+      });
+      if (!uris || uris.length === 0) return;
+      const sarifPath = uris[0].fsPath;
+
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (folder && !isPathWithinWorkspace(folder.uri.fsPath, sarifPath)) {
+        vscode.window.showErrorMessage('Selected file is outside the current workspace.');
+        return;
+      }
+
+      const raw = fs.readFileSync(sarifPath, 'utf8');
+      const sizeCheck = validateSarifContent(raw);
+      if (!sizeCheck.ok) {
+        vscode.window.showErrorMessage(`Cannot import SARIF: ${sizeCheck.error}`);
+        return;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = parseSarif(raw);
+      } catch {
+        vscode.window.showErrorMessage('Failed to parse SARIF file: invalid JSON.');
+        return;
+      }
+
+      if (!validateSarifShape(parsed)) {
+        vscode.window.showErrorMessage('File does not look like a valid SARIF 2.1.0 log.');
+        return;
+      }
+
+      const countCheck = validateSarifResultCount(parsed.runs);
+      if (!countCheck.ok) {
+        vscode.window.showErrorMessage(`Cannot import SARIF: ${countCheck.error}`);
+        return;
+      }
+
+      const findings = sarifToFindings(parsed);
+      vscode.window.showInformationMessage(
+        `Imported ${findings.length} finding(s) from ${path.basename(sarifPath)}.`
+      );
 
       // Remote workspaces (SSH, Codespaces, WSL) use non-file URIs; the CLI
       // must run on the same machine as the source files.

@@ -74,6 +74,12 @@
         "title": "Sanctifier: Analyze workspace with CLI (JSON)"
       },
       {
+        "command": "sanctifier.exportSarif",
+        "title": "Sanctifier: Export findings as SARIF"
+      },
+      {
+        "command": "sanctifier.importSarif",
+        "title": "Sanctifier: Import SARIF file"
         "command": "sanctifier.toggleEnable",
         "title": "Sanctifier: Toggle enable/disable"
       },
@@ -87,14 +93,23 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "jest --passWithNoTests",
+    "lint": "eslint src --ext .ts --max-warnings 0"
     "test": "vitest run",
     "test": "node --test out/analyzer.test.js",
     "test": "npm run compile && node --test out/test/analyzer.test.js",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.3.0"
     "typescript": "^5.3.0",
     "vitest": "^1.6.0"
   }
