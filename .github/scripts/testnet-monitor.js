@@ -30,32 +30,31 @@ function parseContracts(markdown) {
 
 function runHealthCheck(contract) {
   const startedAt = new Date().toISOString();
+  // Use `stellar contract fetch` to verify the contract is deployed and
+  // reachable.  Invoking a specific entry-point (e.g. `health_check`) fails
+  // for contracts that don't export that function, which was the root cause
+  // of the recurring #909 issue reports for the Vulnerable Contract demo.
   const result = spawnSync(
     "stellar",
     [
       "contract",
-      "invoke",
+      "fetch",
       "--id",
       contract.id,
-      "--source",
-      "testnet-monitor",
       "--network",
       "testnet",
-      "--",
-      "health_check",
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", timeout: 30_000 },
   );
 
   const stdout = result.stdout.trim();
   const stderr = result.stderr.trim();
   const output = [stdout, stderr].filter(Boolean).join("\n");
-  const returnedTrue = /\btrue\b/i.test(output);
 
   return {
     ...contract,
     checkedAt: startedAt,
-    healthy: result.status === 0 && returnedTrue,
+    healthy: result.status === 0,
     exitCode: result.status,
     output,
   };

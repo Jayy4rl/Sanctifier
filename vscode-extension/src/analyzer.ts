@@ -179,7 +179,7 @@ function analyzeArithmeticHeuristic(lines: string[], findings: EditorFinding[]):
       inContract.add(L);
     }
   }
-  const opBetweenIds = /\b[a-zA-Z_]\w*\s*(\+|\-|\*)\s*[a-zA-Z_]\w*\b/;
+  const opBetweenIds = /\b[a-zA-Z_]\w*\s*([+\-*])\s*[a-zA-Z_]\w*\b/;
   for (let i = 0; i < lines.length; i++) {
     if (!inContract.has(i)) {
       continue;
@@ -224,7 +224,7 @@ export function looksLikeSorobanSource(text: string): boolean {
   return (
     /#\s*\[\s*contractimpl\b/.test(text) ||
     /\bsoroban_sdk\b/.test(text) ||
-    /\#\[contract\b/.test(text) ||
+    /#\[contract\b/.test(text) ||
     /\bcontractimpl\b/.test(text)
   );
 }

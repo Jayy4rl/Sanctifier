@@ -9,5 +9,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "exclude": ["node_modules", "out"]
+  "exclude": ["node_modules", "out", "src/**/*.test.ts", "src/__mocks__/**"]
+  "exclude": ["node_modules", "out", "src/**/*.test.ts"]
 }
