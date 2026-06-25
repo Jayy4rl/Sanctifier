@@ -24,6 +24,7 @@ pub mod suppress;
 pub mod update;
 pub mod upgrade;
 pub mod verify;
+pub mod verify_deployment;
 pub mod watch;
 pub mod webhook;
 pub mod workspace;

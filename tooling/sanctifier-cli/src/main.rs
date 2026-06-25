@@ -54,6 +54,8 @@ pub enum Commands {
     Reentrancy(commands::reentrancy::ReentrancyArgs),
     /// Verify local source against on-chain bytecode
     Verify(commands::verify::VerifyArgs),
+    /// Verify an on-chain deployment matches expected local source or a pinned hash
+    VerifyDeployment(commands::verify_deployment::VerifyDeploymentArgs),
     /// Analyze an entire Cargo workspace (multiple contracts/libs)
     Workspace(commands::workspace::WorkspaceArgs),
     /// Watch for file changes and auto-rerun analysis
@@ -120,6 +122,7 @@ fn run() -> anyhow::Result<()> {
         Commands::Upgrade(args) => commands::upgrade::exec(args),
         Commands::Reentrancy(args) => commands::reentrancy::exec(args),
         Commands::Verify(args) => commands::verify::exec(args),
+        Commands::VerifyDeployment(args) => commands::verify_deployment::exec(args),
         Commands::Workspace(args) => commands::workspace::exec(args),
         Commands::Watch(args) => commands::watch::exec(args),
         Commands::Completions { shell } => {
