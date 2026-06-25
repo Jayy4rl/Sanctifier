@@ -204,6 +204,22 @@ function analyzeArithmeticHeuristic(lines: string[], findings: EditorFinding[]):
   }
 }
 
+/** Numeric rank for severity comparison (higher = more severe). */
+export const SEVERITY_ORDER: Record<Severity, number> = {
+  information: 0,
+  warning: 1,
+  error: 2,
+};
+
+/**
+ * Returns only findings whose severity is >= minSeverity.
+ * Useful for the in-editor view and the workspace-scan command.
+ */
+export function filterBySeverity(findings: EditorFinding[], minSeverity: Severity): EditorFinding[] {
+  const threshold = SEVERITY_ORDER[minSeverity];
+  return findings.filter((f) => SEVERITY_ORDER[f.severity] >= threshold);
+}
+
 export function looksLikeSorobanSource(text: string): boolean {
   return (
     /#\s*\[\s*contractimpl\b/.test(text) ||

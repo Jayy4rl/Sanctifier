@@ -118,6 +118,17 @@
 - Integration examples
 - Troubleshooting
 
+### VS Code Extension
+
+**Location:** [`vscode-extension/`](vscode-extension/)
+
+- **API stability** — `activate()` returns a typed `SanctifierExtensionApi` (`version`, `getFindings(uri)`) that other extensions can consume via `vscode.extensions.getExtension(...).exports`
+- **`sanctifier.minSeverity`** — filter in-editor diagnostics to `error`, `warning` (default), or `information`
+- **`sanctifier.toggleEnable`** — toggle the extension on/off from the command palette or status bar click
+- **`sanctifier.showOutput`** — reveal the persistent output channel
+- **`sanctifier.analyzeWorkspace`** — run the CLI and stream results to the output channel (respects `minSeverity`)
+- Status bar item shows live finding count; click to toggle
+
 ### Sanctifier CLI Deploy Command
 
 **Location:** `tooling/sanctifier-cli/src/commands/deploy.rs`
