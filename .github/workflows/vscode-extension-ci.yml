@@ -6,12 +6,14 @@ on:
       - main
     paths:
       - "vscode-extension/**"
+      - ".devcontainer/**"
       - ".github/workflows/vscode-extension-ci.yml"
   pull_request:
     branches:
       - main
     paths:
       - "vscode-extension/**"
+      - ".devcontainer/**"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

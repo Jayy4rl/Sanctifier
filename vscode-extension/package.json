@@ -53,7 +53,6 @@
           "default": true,
           "description": "If true, only activate in workspaces whose Cargo.toml references soroban-sdk.",
           "markdownDescription": "When enabled, diagnostics only appear in workspaces that contain a `Cargo.toml` referencing `soroban-sdk`. Disable to run in any Rust project."
-          "description": "If true, only activate in workspaces whose Cargo.toml references soroban-sdk."
         },
         "sanctifier.minSeverity": {
           "type": "string",
@@ -80,6 +79,8 @@
       {
         "command": "sanctifier.importSarif",
         "title": "Sanctifier: Import SARIF file"
+      },
+      {
         "command": "sanctifier.toggleEnable",
         "title": "Sanctifier: Toggle enable/disable"
       },
@@ -95,10 +96,6 @@
     "watch": "tsc -watch -p ./",
     "test": "jest --passWithNoTests",
     "lint": "eslint src --ext .ts --max-warnings 0"
-    "test": "vitest run",
-    "test": "node --test out/analyzer.test.js",
-    "test": "npm run compile && node --test out/test/analyzer.test.js",
-    "lint": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
@@ -109,7 +106,6 @@
     "eslint": "^8.57.1",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
-    "typescript": "^5.3.0"
     "typescript": "^5.3.0",
     "vitest": "^1.6.0"
   }
