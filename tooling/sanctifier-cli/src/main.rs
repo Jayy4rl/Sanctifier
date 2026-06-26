@@ -4,10 +4,10 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use std::io;
 
-mod commands;
-mod logging;
-mod telemetry;
-pub mod vulndb;
+use sanctifier_cli::commands;
+use sanctifier_cli::logging;
+use sanctifier_cli::telemetry;
+use sanctifier_cli::vulndb;
 
 #[derive(Parser)]
 #[command(
