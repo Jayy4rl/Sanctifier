@@ -31,6 +31,14 @@ pub struct BenchmarkArgs {
     /// Save the raw timing data as JSON to this path for future `--baseline` use.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+
+    /// Fail if any rule's p95 exceeds this budget in milliseconds.
+    #[arg(long)]
+    pub budget_ms: Option<f64>,
+
+    /// Opt-in to anonymous telemetry reporting for this benchmark run
+    #[arg(long)]
+    pub telemetry: bool,
 }
 
 /// Per-rule timing data stored in the JSON snapshot.
@@ -137,11 +145,34 @@ pub fn exec(args: BenchmarkArgs) -> anyhow::Result<()> {
             generated_at,
             corpus_path: args.corpus.display().to_string(),
             iterations,
-            rules: timings,
+            rules: timings.clone(),
         };
         let json = serde_json::to_string_pretty(&snapshot)?;
         fs::write(out_path, json)?;
         eprintln!("Saved benchmark snapshot to {}", out_path.display());
+    }
+
+    if args.telemetry {
+        let total_mean: f64 = timings.iter().map(|t| t.mean_ms).sum();
+        let payload = crate::telemetry::AnalysisTelemetry {
+            tool_version: crate::telemetry::sanitize_version(env!("CARGO_PKG_VERSION")),
+            duration_ms: total_mean.round() as u64,
+            rule_ids: timings.iter().map(|t| t.rule.clone()).collect(),
+        };
+        if let Err(e) = crate::telemetry::emit_analysis_telemetry(&payload) {
+            eprintln!("Warning: Failed to submit telemetry: {}", e);
+        }
+    }
+
+    if let Some(budget) = args.budget_ms {
+        let exceeded: Vec<_> = timings.iter().filter(|t| t.p95_ms > budget).collect();
+        if !exceeded.is_empty() {
+            eprintln!("\nError: The following rules exceeded the p95 budget of {:.2}ms:", budget);
+            for t in exceeded {
+                eprintln!("  - {}: {:.2}ms", t.rule, t.p95_ms);
+            }
+            std::process::exit(1);
+        }
     }
 
     Ok(())

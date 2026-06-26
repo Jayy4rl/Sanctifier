@@ -958,3 +958,43 @@ impl VulnerableContract {
         "Should mention 3 Address parameters"
     );
 }
+
+#[test]
+fn test_analyze_with_invalid_config_fails() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join(".sanctify.toml");
+    fs::write(&config_path, "invalid_toml = [").unwrap();
+
+    let mut cmd = Command::cargo_bin("sanctifier").unwrap();
+    cmd.current_dir(dir.path())
+        .arg("analyze")
+        .arg("some_file.rs")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("Invalid configuration file"));
+}
+
+#[test]
+fn test_benchmark_budget_exceeded() {
+    let dir = tempdir().unwrap();
+    let src_path = dir.path().join("lib.rs");
+    fs::write(&src_path, "pub fn foo() {}").unwrap();
+
+    let mut cmd = Command::cargo_bin("sanctifier").unwrap();
+    cmd.arg("benchmark")
+        .arg(dir.path())
+        .arg("--budget-ms")
+        .arg("0.0000001") // guaranteed to fail
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("exceeded the p95 budget"));
+}
+
+#[test]
+fn test_telemetry_flag_parses() {
+    let mut cmd = Command::cargo_bin("sanctifier").unwrap();
+    cmd.arg("--telemetry")
+        .arg("--help")
+        .assert()
+        .success();
+}
