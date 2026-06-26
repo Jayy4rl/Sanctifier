@@ -91,7 +91,7 @@ pub enum Commands {
 fn main() {
     if let Err(err) = run() {
         eprintln!("Error: {}", err);
-        std::process::exit(2);
+        std::process::exit(sanctifier_cli::exit_codes::ERROR);
     }
 }
 
@@ -104,7 +104,9 @@ fn run() -> anyhow::Result<()> {
 
     // Initialize structured logging before dispatching
     let log_format = match &cli.command {
-        Commands::Analyze(args) if args.format == "json" => logging::LogOutput::Json,
+        Commands::Analyze(args) if args.format == "json" || args.format == "sarif" => {
+            logging::LogOutput::Json
+        }
         _ => logging::LogOutput::Text,
     };
     if let Err(e) = logging::init(log_format) {

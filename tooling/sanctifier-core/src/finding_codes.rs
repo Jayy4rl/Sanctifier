@@ -105,6 +105,22 @@ pub struct FindingCode {
     pub doc_url: &'static str,
 }
 
+impl FindingCode {
+    /// Format a short, self-contained diagnostic message suitable for terminal or log output.
+    pub fn format_diagnostic(&self) -> String {
+        format!(
+            "[{}] {} ({:?})\n  {}\n  Remediation: {}\n  More info: {}",
+            self.code, self.title, self.severity, self.description, self.remediation, self.doc_url,
+        )
+    }
+}
+
+/// Look up a single [`FindingCode`] by its code string (e.g. `"S001"`).
+/// Returns `None` if the code is not recognised.
+pub fn lookup_finding_code(code: &str) -> Option<FindingCode> {
+    all_finding_codes().into_iter().find(|c| c.code == code)
+}
+
 /// Returns every finding code known to this version of Sanctifier.
 pub fn all_finding_codes() -> Vec<FindingCode> {
     vec![
@@ -400,6 +416,37 @@ mod tests {
         let codes = all_finding_codes();
         let unique: HashSet<&str> = codes.iter().map(|c| c.code).collect();
         assert_eq!(codes.len(), unique.len());
+    }
+
+    #[test]
+    fn format_diagnostic_contains_code_title_and_remediation() {
+        let code = lookup_finding_code(AUTH_GAP).expect("S001 must exist");
+        let diag = code.format_diagnostic();
+        assert!(diag.contains("S001"), "diagnostic must include the code");
+        assert!(
+            diag.contains("Missing Authorization Guard"),
+            "diagnostic must include the title"
+        );
+        assert!(
+            diag.contains("Remediation:"),
+            "diagnostic must include the remediation label"
+        );
+        assert!(
+            diag.contains("More info:"),
+            "diagnostic must include the doc URL label"
+        );
+    }
+
+    #[test]
+    fn lookup_finding_code_returns_none_for_unknown_code() {
+        assert!(lookup_finding_code("X999").is_none());
+    }
+
+    #[test]
+    fn lookup_finding_code_returns_correct_entry() {
+        let code = lookup_finding_code(REENTRANCY).expect("S013 must exist");
+        assert_eq!(code.code, REENTRANCY);
+        assert_eq!(code.category, "reentrancy");
     }
 
     #[test]

@@ -1201,4 +1201,226 @@ fn test_top_level_help_lists_all_core_subcommands() {
             "top-level --help should list '{cmd}' but didn't"
         );
     }
+// ── #517: Config file resolution precedence ───────────────────────────────────
+
+/// The config file in the same directory as the analysed file is used (nearest wins).
+/// We prove this by placing an INVALID config in the parent and a VALID config in
+/// the child — if the parent were loaded the command would exit 1.
+#[test]
+fn test_config_resolution_nearest_config_wins() {
+    let parent = tempdir().unwrap();
+    fs::write(parent.path().join(".sanctify.toml"), "invalid_toml = [").unwrap();
+
+    let child = parent.path().join("contracts");
+    fs::create_dir_all(&child).unwrap();
+    fs::write(child.join(".sanctify.toml"), "ledger_limit = 64000\n").unwrap();
+
+    let contract = child.join("lib.rs");
+    fs::write(&contract, "fn foo() {}").unwrap();
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(&contract)
+        .assert()
+        .success();
+}
+
+/// When no config exists in the contract's directory the resolver walks up to
+/// the parent directory and uses the config it finds there.
+#[test]
+fn test_config_resolution_walks_up_to_parent_directory() {
+    let parent = tempdir().unwrap();
+    fs::write(
+        parent.path().join(".sanctify.toml"),
+        "ledger_limit = 64000\n",
+    )
+    .unwrap();
+
+    let child = parent.path().join("src");
+    fs::create_dir_all(&child).unwrap();
+
+    let contract = child.join("lib.rs");
+    fs::write(&contract, "fn foo() {}").unwrap();
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(&contract)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Static analysis complete."));
+}
+
+/// When no config file exists anywhere the default config is used and analysis
+/// still completes successfully.
+#[test]
+fn test_config_resolution_defaults_when_no_config_found() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("lib.rs");
+    fs::write(&contract, "fn foo() {}").unwrap();
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(&contract)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Static analysis complete."));
+}
+
+// ── #518: Output format validation ───────────────────────────────────────────
+
+/// An unrecognised format string is rejected with a clear error message.
+#[test]
+fn test_analyze_rejects_unknown_format() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("lib.rs");
+    fs::write(&contract, "fn foo() {}").unwrap();
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(&contract)
+        .arg("--format")
+        .arg("xml")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("unknown output format"));
+}
+
+/// `--format sarif` produces a valid SARIF 2.1.0 document on stdout.
+#[test]
+fn test_analyze_sarif_format_produces_sarif_document() {
+    let dir = tempdir().unwrap();
+    let contract = dir.path().join("lib.rs");
+    fs::write(&contract, "fn foo() {}").unwrap();
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(&contract)
+        .arg("--format")
+        .arg("sarif")
+        .env_remove("RUST_LOG")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "sarif output should exit 0");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: Value = serde_json::from_str(&stdout)
+        .expect("sarif output should be valid JSON");
+    assert_eq!(json["version"], "2.1.0", "sarif version must be 2.1.0");
+    assert!(json["runs"].is_array(), "sarif must have a runs array");
+    assert!(
+        json["runs"][0]["tool"]["driver"]["name"].as_str() == Some("sanctifier"),
+        "sarif tool name must be 'sanctifier'"
+    );
+}
+
+/// `--format sarif` on a file with findings still exits 0 (format parity with json).
+#[test]
+fn test_analyze_sarif_findings_are_in_results_array() {
+    let fixture_path = env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/vulnerable_contract.rs");
+
+    let output = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(fixture_path)
+        .arg("--format")
+        .arg("sarif")
+        .env_remove("RUST_LOG")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: Value = serde_json::from_str(&stdout).unwrap();
+    let results = json["runs"][0]["results"].as_array().unwrap();
+    assert!(
+        !results.is_empty(),
+        "vulnerable contract must produce sarif results"
+    );
+
+    let first = &results[0];
+    assert!(first["ruleId"].is_string(), "result must have ruleId");
+    assert!(first["level"].is_string(), "result must have level");
+    assert!(
+        first["message"]["text"].is_string(),
+        "result must have message.text"
+    );
+    assert!(
+        first["locations"].is_array(),
+        "result must have locations array"
+    );
+}
+
+// ── #519: Analysis profile exit codes ────────────────────────────────────────
+
+/// `--profile strict` exits 1 whenever any finding is detected.
+#[test]
+fn test_profile_strict_exits_one_on_findings() {
+    let fixture_path = env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/vulnerable_contract.rs");
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(fixture_path)
+        .arg("--profile")
+        .arg("strict")
+        .assert()
+        .failure();
+}
+
+/// `--profile lenient` exits 0 even when findings are present.
+#[test]
+fn test_profile_lenient_exits_zero_with_findings() {
+    let fixture_path = env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/vulnerable_contract.rs");
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(fixture_path)
+        .arg("--profile")
+        .arg("lenient")
+        .assert()
+        .success();
+}
+
+/// `--profile ci` exits 1 when findings are detected.
+#[test]
+fn test_profile_ci_exits_one_on_findings() {
+    let fixture_path = env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/vulnerable_contract.rs");
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(fixture_path)
+        .arg("--profile")
+        .arg("ci")
+        .assert()
+        .failure();
+}
+
+/// Without `--exit-code` or `--profile`, findings do not cause a non-zero exit.
+#[test]
+fn test_no_profile_no_exit_code_exits_zero_with_findings() {
+    let fixture_path = env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/vulnerable_contract.rs");
+
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("analyze")
+        .arg(fixture_path)
+        .assert()
+        .success();
 }

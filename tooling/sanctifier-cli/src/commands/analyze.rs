@@ -131,16 +131,41 @@ pub(crate) struct FileAnalysisResult {
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 pub fn exec(args: AnalyzeArgs) -> anyhow::Result<()> {
-    let should_exit_on_findings = args.exit_code;
+    let profile = args.profile;
+    let exit_code_flag = args.exit_code;
     let found_issues = run_analysis(args)?;
-    if found_issues && should_exit_on_findings {
-        std::process::exit(1);
+    if resolve_exit(profile, exit_code_flag, found_issues) {
+        std::process::exit(crate::exit_codes::FINDINGS_FOUND);
     }
     Ok(())
 }
 
+/// Decide whether to exit with a non-zero code based on the active profile and
+/// the `--exit-code` flag.  Profile overrides the flag when both are supplied.
+fn resolve_exit(
+    profile: Option<AnalysisProfile>,
+    exit_code_flag: bool,
+    found_issues: bool,
+) -> bool {
+    match profile {
+        Some(AnalysisProfile::Strict) => found_issues,
+        Some(AnalysisProfile::Lenient) | Some(AnalysisProfile::Audit) => false,
+        Some(AnalysisProfile::Ci) => found_issues,
+        None => exit_code_flag && found_issues,
+    }
+}
+
+const VALID_FORMATS: &[&str] = &["text", "json", "ndjson", "sarif"];
+
 /// Run the full analysis and dispatch to the appropriate output format.
 pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
+    if !VALID_FORMATS.contains(&args.format.as_str()) {
+        anyhow::bail!(
+            "unknown output format {:?}; valid values are: {}",
+            args.format,
+            VALID_FORMATS.join(", ")
+        );
+    }
     if args.format == "ndjson" {
         return stream_ndjson(&args);
     }
@@ -259,6 +284,40 @@ pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
                 },
             }))?
         );
+    } else if args.format == "sarif" {
+        let results: Vec<serde_json::Value> = all_violations
+            .iter()
+            .map(|(file, v)| {
+                let level = match format!("{:?}", v.severity).as_str() {
+                    "Error" => "error",
+                    "Warning" => "warning",
+                    _ => "note",
+                };
+                let msg = match &v.suggestion {
+                    Some(s) => format!("{} — {}", v.message, s),
+                    None => v.message.clone(),
+                };
+                serde_json::json!({
+                    "ruleId": v.rule_name,
+                    "level": level,
+                    "message": { "text": msg },
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": file,
+                                "uriBaseId": "%SRCROOT%"
+                            }
+                        }
+                    }]
+                })
+            })
+            .collect();
+        let sarif = crate::commands::sarif::build_sarif_log(
+            "sanctifier",
+            env!("CARGO_PKG_VERSION"),
+            results,
+        );
+        println!("{}", serde_json::to_string_pretty(&sarif)?);
     } else {
         if let Some(profile) = args.profile {
             println!(
