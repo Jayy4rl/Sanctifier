@@ -18,7 +18,11 @@ pub mod vulndb;
 struct Cli {
     /// Disable coloured output (also respects NO_COLOR env var)
     #[arg(long, global = true)]
-    no_color: bool,
+    pub no_color: bool,
+
+    /// Opt-in to anonymous telemetry reporting for this invocation
+    #[arg(long, global = true)]
+    pub telemetry: bool,
 
     #[command(subcommand)]
     command: Commands,

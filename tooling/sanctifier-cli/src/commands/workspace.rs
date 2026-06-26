@@ -367,8 +367,12 @@ fn load_config_for(path: &Path) -> SanctifyConfig {
         let config_path = current.join(".sanctify.toml");
         if config_path.exists() {
             if let Ok(content) = fs::read_to_string(&config_path) {
-                if let Ok(config) = toml::from_str(&content) {
-                    return config;
+                match toml::from_str(&content) {
+                    Ok(config) => return config,
+                    Err(e) => {
+                        eprintln!("Error: Invalid configuration file at {}\n{}", config_path.display(), e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
