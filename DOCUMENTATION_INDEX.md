@@ -101,6 +101,15 @@
 - Security best practices and monitoring
 - Integration examples for contract developers
 
+### Live Testnet Status Widget
+
+**[LIVE_TESTNET.md](LIVE_TESTNET.md)** — deployed contract addresses and on-chain verification
+- Three live Soroban Testnet contracts with real-time status
+- Live widget available at `/` (home page) via the `TestnetStatusWidget` component
+  ([frontend/app/components/TestnetStatusWidget.tsx](frontend/app/components/TestnetStatusWidget.tsx))
+- API route: `GET /api/testnet-status` — polls Soroban RPC + Stellar Expert, cached 30 s
+- See also: [docs/soroban-deployment.md](docs/soroban-deployment.md) for re-deployment instructions
+
 ### Runtime Guard Wrapper Contract
 
 **[contracts/runtime-guard-wrapper/README.md](contracts/runtime-guard-wrapper/README.md)**

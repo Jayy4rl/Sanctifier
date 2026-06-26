@@ -1,112 +1,97 @@
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
-import { analyzeSorobanSource, looksLikeSorobanSource, CODES, filterBySeverity, SEVERITY_ORDER } from '../analyzer';
+import {
+  analyzeSorobanSource,
+  looksLikeSorobanSource,
+  filterBySeverity,
+  CODES,
+  SEVERITY_ORDER,
+} from '../analyzer';
 
-// Fixtures live in src/test/fixtures; resolve from compiled output location
 const fixturesDir = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures');
 
 function fixture(name: string): string {
   return fs.readFileSync(path.join(fixturesDir, name), 'utf8');
 }
 
-describe('looksLikeSorobanSource', () => {
+describe('looksLikeSorobanSource (fixture-based)', () => {
   it('detects #[contractimpl] attribute', () => {
-    assert.ok(looksLikeSorobanSource('#[contractimpl]\nimpl Foo {}'));
+    expect(looksLikeSorobanSource('#[contractimpl]\nimpl Foo {}')).toBe(true);
   });
 
   it('detects soroban_sdk crate usage', () => {
-    assert.ok(looksLikeSorobanSource('use soroban_sdk::Env;'));
+    expect(looksLikeSorobanSource('use soroban_sdk::Env;')).toBe(true);
   });
 
   it('detects #[contract] attribute', () => {
-    assert.ok(looksLikeSorobanSource('#[contract]\nstruct Foo;'));
+    expect(looksLikeSorobanSource('#[contract]\nstruct Foo;')).toBe(true);
   });
 
   it('returns false for plain Rust with no Soroban markers', () => {
-    assert.ok(!looksLikeSorobanSource('fn main() {\n  println!("hello");\n}'));
+    expect(looksLikeSorobanSource('fn main() {\n  println!("hello");\n}')).toBe(false);
   });
 });
 
-describe('analyzeSorobanSource — auth gap (S001)', () => {
+describe('analyzeSorobanSource — auth gap (S001) via fixture', () => {
   it('flags a privileged fn missing require_auth', () => {
     const src = fixture('auth_gap.rs');
     const findings = analyzeSorobanSource(src);
-    assert.ok(
-      findings.some((f) => f.code === CODES.AUTH_GAP),
-      `expected S001 finding; got: ${JSON.stringify(findings)}`
-    );
+    expect(findings.some((f) => f.code === CODES.AUTH_GAP)).toBe(true);
   });
 
   it('does not flag when require_auth is present', () => {
     const src = fixture('safe_contract.rs');
     const findings = analyzeSorobanSource(src);
-    assert.ok(
-      !findings.some((f) => f.code === CODES.AUTH_GAP),
-      `unexpected S001 finding; got: ${JSON.stringify(findings)}`
-    );
+    expect(findings.some((f) => f.code === CODES.AUTH_GAP)).toBe(false);
   });
 });
 
-describe('analyzeSorobanSource — unsafe patterns (S002 / S006)', () => {
+describe('analyzeSorobanSource — unsafe patterns (S002 / S006) via fixture', () => {
   it('flags panic! with S002', () => {
     const src = fixture('panic_contract.rs');
     const findings = analyzeSorobanSource(src);
-    assert.ok(
-      findings.some((f) => f.code === CODES.PANIC_USAGE),
-      `expected S002; got: ${JSON.stringify(findings)}`
-    );
+    expect(findings.some((f) => f.code === CODES.PANIC_USAGE)).toBe(true);
   });
 
   it('flags .unwrap() with S006', () => {
     const src = fixture('panic_contract.rs');
     const findings = analyzeSorobanSource(src);
-    assert.ok(
-      findings.some((f) => f.code === CODES.UNSAFE_PATTERN),
-      `expected S006; got: ${JSON.stringify(findings)}`
-    );
+    expect(findings.some((f) => f.code === CODES.UNSAFE_PATTERN)).toBe(true);
   });
 
   it('does not flag commented-out unwrap', () => {
     const src = '// let x = val.unwrap();\nfn safe() {}';
     const findings = analyzeSorobanSource(src);
-    assert.ok(!findings.some((f) => f.code === CODES.UNSAFE_PATTERN));
+    expect(findings.some((f) => f.code === CODES.UNSAFE_PATTERN)).toBe(false);
   });
 });
 
-describe('analyzeSorobanSource — arithmetic overflow (S003)', () => {
+describe('analyzeSorobanSource — arithmetic overflow (S003) via fixture', () => {
   it('flags unchecked arithmetic inside contractimpl', () => {
     const src = fixture('overflow_contract.rs');
     const findings = analyzeSorobanSource(src);
-    assert.ok(
-      findings.some((f) => f.code === CODES.ARITHMETIC_OVERFLOW),
-      `expected S003; got: ${JSON.stringify(findings)}`
-    );
+    expect(findings.some((f) => f.code === CODES.ARITHMETIC_OVERFLOW)).toBe(true);
   });
 
-  it('does not flag checked_add', () => {
+  it('S003 does not fire on lines containing checked_', () => {
     const src = fixture('overflow_contract.rs');
     const findings = analyzeSorobanSource(src);
     const overflowFindings = findings.filter((f) => f.code === CODES.ARITHMETIC_OVERFLOW);
     const lines = src.split('\n');
     for (const f of overflowFindings) {
       const lineText = lines[f.line - 1] ?? '';
-      assert.ok(
-        !lineText.includes('checked_'),
-        `S003 should not fire on a line containing checked_: "${lineText}"`
-      );
+      expect(lineText).not.toMatch(/checked_/);
     }
   });
 
   it('does not flag arithmetic outside contractimpl', () => {
     const src = 'fn helper(a: i128, b: i128) -> i128 { a + b }';
     const findings = analyzeSorobanSource(src);
-    assert.ok(!findings.some((f) => f.code === CODES.ARITHMETIC_OVERFLOW));
+    expect(findings.some((f) => f.code === CODES.ARITHMETIC_OVERFLOW)).toBe(false);
   });
 });
 
-describe('analyzeSorobanSource — deduplication', () => {
+describe('analyzeSorobanSource — deduplication via fixture', () => {
   it('does not emit duplicate findings for the same line and code', () => {
     const src = [
       'use soroban_sdk::contractimpl;',
@@ -118,19 +103,18 @@ describe('analyzeSorobanSource — deduplication', () => {
     ].join('\n');
     const findings = analyzeSorobanSource(src);
     const keys = findings.map((f) => `${f.line}:${f.code}:${f.message.slice(0, 40)}`);
-    const unique = new Set(keys);
-    assert.strictEqual(keys.length, unique.size, 'duplicate findings detected');
+    expect(keys.length).toBe(new Set(keys).size);
   });
 });
 
-describe('SEVERITY_ORDER', () => {
+describe('SEVERITY_ORDER (integration)', () => {
   it('ranks information < warning < error', () => {
-    assert.ok(SEVERITY_ORDER.information < SEVERITY_ORDER.warning);
-    assert.ok(SEVERITY_ORDER.warning < SEVERITY_ORDER.error);
+    expect(SEVERITY_ORDER.information).toBeLessThan(SEVERITY_ORDER.warning);
+    expect(SEVERITY_ORDER.warning).toBeLessThan(SEVERITY_ORDER.error);
   });
 });
 
-describe('filterBySeverity', () => {
+describe('filterBySeverity (integration)', () => {
   const mixed = [
     { line: 1, code: 'S002', severity: 'error' as const, message: 'panic' },
     { line: 2, code: 'S001', severity: 'warning' as const, message: 'auth gap' },
@@ -138,27 +122,27 @@ describe('filterBySeverity', () => {
   ];
 
   it('passes all findings when minSeverity is information', () => {
-    assert.strictEqual(filterBySeverity(mixed, 'information').length, 3);
+    expect(filterBySeverity(mixed, 'information')).toHaveLength(3);
   });
 
   it('drops information-level findings when minSeverity is warning', () => {
     const result = filterBySeverity(mixed, 'warning');
-    assert.strictEqual(result.length, 2);
-    assert.ok(result.every((f) => f.severity !== 'information'));
+    expect(result).toHaveLength(2);
+    expect(result.every((f) => f.severity !== 'information')).toBe(true);
   });
 
   it('keeps only errors when minSeverity is error', () => {
     const result = filterBySeverity(mixed, 'error');
-    assert.strictEqual(result.length, 1);
-    assert.strictEqual(result[0].code, 'S002');
+    expect(result).toHaveLength(1);
+    expect(result[0].code).toBe('S002');
   });
 
   it('returns empty array when no findings meet threshold', () => {
     const infoOnly = [{ line: 1, code: 'S003', severity: 'information' as const, message: 'hint' }];
-    assert.deepStrictEqual(filterBySeverity(infoOnly, 'error'), []);
+    expect(filterBySeverity(infoOnly, 'error')).toEqual([]);
   });
 
   it('returns empty array for empty input', () => {
-    assert.deepStrictEqual(filterBySeverity([], 'warning'), []);
+    expect(filterBySeverity([], 'warning')).toEqual([]);
   });
 });
