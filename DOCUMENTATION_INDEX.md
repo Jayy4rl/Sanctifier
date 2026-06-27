@@ -160,6 +160,15 @@
 
 ### Finding Code Documentation
 
+**[docs/rules/s003-arithmetic-overflow.md](docs/rules/s003-arithmetic-overflow.md)** - S003: Arithmetic Overflow / Underflow Detection
+
+- Unchecked arithmetic operation detection (+, -, *, /, %, compound assignments)
+- Custom math method detection (mul_div, fixed_point_*)
+- Test code and index expression exclusions
+- Comprehensive remediation guidance with checked/saturating alternatives
+- Deduplication strategy and output formats
+- Known limitations and configuration options
+
 **[docs/rules/s012-sep41-interface.md](docs/rules/s012-sep41-interface.md)** - S012: SEP-41 Token Interface Compliance
 
 - Complete SEP-41 standard interface verification
