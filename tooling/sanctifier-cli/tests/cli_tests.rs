@@ -1201,6 +1201,7 @@ fn test_top_level_help_lists_all_core_subcommands() {
             "top-level --help should list '{cmd}' but didn't"
         );
     }
+}
 // ── #517: Config file resolution precedence ───────────────────────────────────
 
 /// The config file in the same directory as the analysed file is used (nearest wins).

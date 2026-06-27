@@ -208,6 +208,7 @@
 - Threat model and operational guarantees: [docs/release-artifacts-threat-model.md](docs/release-artifacts-threat-model.md)
 - How to verify a downloaded artifact: [docs/provenance-verification.md](docs/provenance-verification.md)
 - Canonical artifact list: [data/release-manifest.json](data/release-manifest.json)
+- Packaging and Installation Guide: [docs/PACKAGING_AND_INSTALL.md](docs/PACKAGING_AND_INSTALL.md)
 
 ---
 

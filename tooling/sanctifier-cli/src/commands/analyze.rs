@@ -180,14 +180,14 @@ pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     }
 
     let start = Instant::now();
-    let config = load_config(path);
+    let config = load_config(&path);
     let telemetry_enabled = config.telemetry;
 
     // When a single file is given, scan only that file — not its parent directory.
     let rs_files: Vec<PathBuf> = if path.is_file() {
         vec![path.clone()]
     } else {
-        collect_rs_files(path, &config.ignore_paths)
+        collect_rs_files(&path, &config.ignore_paths)
     };
 
     let registry = RuleRegistry::with_default_rules();
@@ -701,15 +701,27 @@ fn sha256_hex(content: &str) -> String {
 #[cfg(not(windows))]
 pub(crate) fn normalize_cli_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
-    if s.contains('\\') {
+    let sanitized = if s.contains('\\') {
         PathBuf::from(s.replace('\\', "/"))
     } else {
         p
+    };
+
+    // Prevent directory traversal escapes (security default)
+    if sanitized.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        eprintln!("Warning: Path traversal detected. Falling back to current directory.");
+        return PathBuf::from(".");
     }
+    sanitized
 }
 
 #[cfg(windows)]
 pub(crate) fn normalize_cli_path(p: PathBuf) -> PathBuf {
+    // Prevent directory traversal escapes (security default)
+    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        eprintln!("Warning: Path traversal detected. Falling back to current directory.");
+        return PathBuf::from(".");
+    }
     p
 }
 

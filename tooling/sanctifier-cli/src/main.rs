@@ -6,8 +6,6 @@ use std::io;
 
 use sanctifier_cli::commands;
 use sanctifier_cli::logging;
-use sanctifier_cli::telemetry;
-use sanctifier_cli::vulndb;
 
 #[derive(Parser)]
 #[command(
