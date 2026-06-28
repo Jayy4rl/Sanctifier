@@ -24,6 +24,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev libdbus-1-dev libudev-dev pkg-config
+
       - name: Cache cargo registry & build artifacts
         uses: actions/cache@v5
         with:
@@ -70,6 +75,11 @@ jobs:
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev libdbus-1-dev libudev-dev pkg-config
 
       - name: Cache cargo registry & build artifacts
         uses: actions/cache@v5
@@ -122,6 +132,11 @@ jobs:
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev libdbus-1-dev libudev-dev pkg-config
+
       - name: Cache cargo registry & build artifacts
         uses: actions/cache@v5
         with:
@@ -149,3 +164,71 @@ jobs:
             echo "::error::Uncommitted snapshot changes detected. Run INSTA_UPDATE=new cargo test --test sarif_snapshots -p sanctifier-core --no-default-features then cargo insta accept --workspace and commit the .snap files."
             exit 1
           fi
+
+  # ---------------------------------------------------------------------------
+  # Rule engine orchestration — integration/e2e coverage
+  # Covers: RuleRegistry pipeline, determinism, custom rules, output stability.
+  # ---------------------------------------------------------------------------
+  rule-engine-e2e:
+    name: Rule Engine Orchestration (integration/e2e)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev libdbus-1-dev libudev-dev pkg-config
+
+      - name: Cache cargo registry & build artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-rule-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-rule-e2e-
+
+      - name: Run rule engine orchestration integration tests
+        run: cargo test --test rule_engine_orchestration_test -p sanctifier-core
+
+  # ---------------------------------------------------------------------------
+  # Z3 backend module boundaries — integration coverage for S011
+  # Covers: smt::types, smt::invariants, smt::backend, smt::benchmark.
+  # ---------------------------------------------------------------------------
+  smt-module-boundaries:
+    name: Z3 Backend Module Boundaries (S011)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev libdbus-1-dev libudev-dev pkg-config
+
+      - name: Cache cargo registry & build artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-smt-boundaries-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-smt-boundaries-
+
+      - name: Run Z3 module boundary integration tests
+        run: cargo test --test smt_module_boundaries_test -p sanctifier-core
