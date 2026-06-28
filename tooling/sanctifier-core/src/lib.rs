@@ -419,6 +419,25 @@ pub struct CustomRuleMatch {
     pub severity: RuleSeverity,
 }
 
+/// Validation error for a [`CustomRule`] (S007).
+///
+/// Returned by [`Analyzer::validate_custom_rules`] so callers can surface
+/// configuration problems to users with actionable messages rather than
+/// silently skipping broken rules at analysis time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomRuleValidationError {
+    /// Name of the offending rule.
+    pub rule_name: String,
+    /// Human-readable description of the problem.
+    pub message: String,
+}
+
+impl std::fmt::Display for CustomRuleValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "custom rule '{}': {}", self.rule_name, self.message)
+    }
+}
+
 /// Project-level configuration loaded from `.sanctify.toml`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SanctifyConfig {
@@ -1062,8 +1081,31 @@ impl Analyzer {
         let mut issue_locations: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 
-        for (line_num, line) in source.lines().enumerate() {
-            let line = line.trim();
+        // Normalize multiline event calls: join "env.events()\n.publish(" onto one line
+        // so the line-by-line scanner can detect them.
+        let mut normalized_lines: Vec<(usize, String)> = Vec::new();
+        {
+            let raw: Vec<&str> = source.lines().collect();
+            let mut i = 0;
+            while i < raw.len() {
+                let trimmed = raw[i].trim();
+                if trimmed.ends_with(".events()")
+                    && i + 1 < raw.len()
+                    && raw[i + 1].trim().starts_with(".publish(")
+                {
+                    let joined = format!("{}{}", trimmed, raw[i + 1].trim());
+                    normalized_lines.push((i, joined));
+                    i += 2;
+                } else {
+                    normalized_lines.push((i, trimmed.to_string()));
+                    i += 1;
+                }
+            }
+        }
+
+        for (line_num, line) in &normalized_lines {
+            let line_num = *line_num;
+            let line = line.as_str();
 
             if line.contains("env.events().publish(") || line.contains("env.events().emit(") {
                 let topics_str = Self::extract_topics(line);
@@ -1203,7 +1245,55 @@ impl Analyzer {
         visitor.issues
     }
 
+    /// Validate custom rules before executing them (S007 UX improvement).
+    ///
+    /// Returns a list of [`CustomRuleValidationError`] for every rule whose
+    /// regex pattern fails to compile or whose name is empty.  An empty return
+    /// value means all rules are ready to run.  Call this once at startup so
+    /// broken configuration is surfaced to the user with a clear message rather
+    /// than silently dropped during analysis.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let errors = analyzer.validate_custom_rules(&config.custom_rules);
+    /// if !errors.is_empty() {
+    ///     for e in &errors { eprintln!("Config error: {e}"); }
+    ///     std::process::exit(1);
+    /// }
+    /// ```
+    pub fn validate_custom_rules(
+        &self,
+        rules: &[CustomRule],
+    ) -> Vec<CustomRuleValidationError> {
+        use regex::Regex;
+        let mut errors = Vec::new();
+        for rule in rules {
+            if rule.name.trim().is_empty() {
+                errors.push(CustomRuleValidationError {
+                    rule_name: "<unnamed>".to_string(),
+                    message: "rule name must not be empty".to_string(),
+                });
+            }
+            if rule.pattern.is_empty() {
+                errors.push(CustomRuleValidationError {
+                    rule_name: rule.name.clone(),
+                    message: "pattern must not be empty — use a non-empty regex string".to_string(),
+                });
+            } else if let Err(e) = Regex::new(&rule.pattern) {
+                errors.push(CustomRuleValidationError {
+                    rule_name: rule.name.clone(),
+                    message: format!("invalid regex pattern '{}': {}", rule.pattern, e),
+                });
+            }
+        }
+        errors
+    }
+
     /// Run regex-based custom rules from config. Returns matches with line and snippet.
+    ///
+    /// Rules with invalid regex patterns are skipped silently. For upfront
+    /// validation that surfaces configuration errors, call
+    /// [`Analyzer::validate_custom_rules`] first.
     pub fn analyze_custom_rules(&self, source: &str, rules: &[CustomRule]) -> Vec<CustomRuleMatch> {
         use regex::Regex;
 
