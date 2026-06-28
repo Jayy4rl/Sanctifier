@@ -30,6 +30,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-deploy:
@@ -42,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -51,7 +52,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo build artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -64,7 +65,9 @@ jobs:
       - name: Install Soroban CLI
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
           cargo install --locked soroban-cli || true
           soroban --version
 
@@ -96,8 +99,20 @@ jobs:
           soroban network ls
           soroban network info --network testnet
 
+      - name: Check deployment secrets
+        id: check-key
+        run: |
+          if [[ -n "${SOROBAN_SECRET_KEY:-}" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SOROBAN_SECRET_KEY secret is not configured — deployment steps will be skipped. Add the secret to the repository to enable live deployments."
+          fi
+        env:
+          SOROBAN_SECRET_KEY: ${{ secrets.SOROBAN_SECRET_KEY }}
+
       - name: Deploy to Soroban testnet (Dry Run)
-        if: github.event.inputs.dry_run == 'true'
+        if: github.event.inputs.dry_run == 'true' && steps.check-key.outputs.present == 'true'
         run: |
           bash scripts/deploy-soroban-testnet.sh \
             --network testnet \
@@ -105,9 +120,10 @@ jobs:
             --debug
         env:
           SOROBAN_SECRET_KEY: ${{ secrets.SOROBAN_SECRET_KEY }}
+          SOROBAN_ACCOUNT_ID: ${{ secrets.SOROBAN_ACCOUNT_ID }}
 
       - name: Deploy to Soroban testnet
-        if: github.event.inputs.dry_run != 'true'
+        if: github.event.inputs.dry_run != 'true' && steps.check-key.outputs.present == 'true'
         run: |
           bash scripts/deploy-soroban-testnet.sh \
             --network testnet \
@@ -116,11 +132,12 @@ jobs:
             --debug
         env:
           SOROBAN_SECRET_KEY: ${{ secrets.SOROBAN_SECRET_KEY }}
+          SOROBAN_ACCOUNT_ID: ${{ secrets.SOROBAN_ACCOUNT_ID }}
         timeout-minutes: 30
 
       - name: Upload deployment manifest
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: deployment-manifest-${{ github.run_id }}
           path: .deployment-manifest.json
@@ -128,7 +145,7 @@ jobs:
 
       - name: Upload deployment log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: deployment-log-${{ github.run_id }}
           path: .deployment.log
@@ -157,15 +174,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download deployment manifest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: deployment-manifest-${{ github.run_id }}
 
       - name: Install Soroban CLI
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
           cargo install --locked soroban-cli || true
 
       - name: Run continuous validation checks
@@ -201,6 +222,7 @@ jobs:
           fi
         env:
           SOROBAN_SECRET_KEY: ${{ secrets.SOROBAN_SECRET_KEY }}
+          SOROBAN_ACCOUNT_ID: ${{ secrets.SOROBAN_ACCOUNT_ID }}
 
       - name: Generate validation report
         if: always()
@@ -232,7 +254,7 @@ jobs:
           fi
 
       - name: Create deployment status check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             github.rest.checks.create({

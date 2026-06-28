@@ -9,10 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **S012 (SEP-41) Hardening**: Comprehensive improvements to SEP-41 token interface checks
+  - Enhanced module-level documentation in `tooling/sanctifier-core/src/sep41.rs` with usage examples, safety considerations, and contribution guidelines
+  - Added 19 integration tests in `tooling/sanctifier-core/tests/sep41_tests.rs` covering all issue types (MissingFunction, SignatureMismatch, AuthorizationMismatch), edge cases, and robustness scenarios
+  - Created detailed rule documentation at `docs/rules/s012-sep41-interface.md` with examples, remediation guidance, and limitations
+  - Added fully-compliant reference implementation in `examples/sep41-compliant-token.rs` demonstrating production-ready SEP-41 token
+  - Enhanced test fixture at `contracts/fixtures/finding-codes/s012_token_interface.rs` to demonstrate all three issue types
+  - Updated `DOCUMENTATION_INDEX.md` to reference S012 documentation
+  - Improved inline comments explaining candidate detection heuristic, graceful error handling, and deterministic output ordering
 - CHANGELOG.md to track project changes
 - Conventional Commits specification for commit messages
+- `data/release-manifest.json` — single source of truth for release artifacts
+  (data/ + schemas/) consumed by the provenance pipeline.
+- `scripts/validate_release_artifacts.js` and the `npm run lint:release-artifacts`
+  target — verifies schema `$schema` declarations, version stability of
+  `analysis-output.json` `schema_version`, and CHECKSUMS coverage.
+- `docs/release-artifacts-threat-model.md` — threat model and operational
+  guarantees for release artifacts.
 
 ### Changed
+
+- `scripts/verify-artifacts.sh` and `scripts/generate-provenance.sh` are now
+  manifest-driven (read file list from `data/release-manifest.json`) and use
+  `set -euo pipefail`, atomic temp-file writes, and a portable
+  `sha256sum` / `shasum -a 256` fallback.
+- `CHECKSUMS.txt` now covers every release artifact declared in the manifest
+  (12 files, up from 3).  The line format is unchanged; existing
+  `grep -v '^#' CHECKSUMS.txt | sha256sum -c` workflows keep working.
+- `.github/workflows/provenance.yml` attests every manifest artifact plus
+  `CHECKSUMS.txt` (subject list is computed from the manifest, not hardcoded).
 
 ### Deprecated
 
@@ -21,3 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+- Closes the coverage gap where 3 of 6 schemas and 5 of 6 data files shipped
+  unattested.  Tampering with a previously-uncovered file is now detectable
+  via `gh attestation verify` or `sha256sum -c CHECKSUMS.txt`.

@@ -170,7 +170,7 @@ struct ReportData {
     event_issues: Vec<sanctifier_core::EventIssue>,
     unhandled_results: Vec<sanctifier_core::UnhandledResultIssue>,
     upgrade_findings: Vec<sanctifier_core::UpgradeFinding>,
-    smt_issues: Vec<sanctifier_core::smt::SmtInvariantIssue>,
+    smt_issues: Vec<sanctifier_core::SmtInvariantIssue>,
     sep41_issues: Vec<sanctifier_core::Sep41Issue>,
     vuln_matches: Vec<VulnMatch>,
     timed_out_files: Vec<String>,
@@ -477,7 +477,7 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
         for s in &data.smt_issues {
             md.push_str(&format!(
                 "| `{}` | `{}` | {} |\n",
-                s.function_name, s.location, s.description
+                s.function_name, s.location, s.description,
             ));
         }
         md.push('\n');

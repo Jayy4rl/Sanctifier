@@ -12,10 +12,9 @@ export function NavBar() {
   const navLinks = [
     { name: "Scan", href: "/scan" },
     { name: "Dashboard", href: "/dashboard" },
+    { name: "Playground", href: "/playground" },
     { name: "Terminal", href: "/terminal" },
   ];
-
-  const githubUrl = "https://github.com/Jayy4rl/Sanctifier";
 
   const isActive = (path: string) => pathname === path;
 
@@ -44,14 +43,6 @@ export function NavBar() {
                   {link.name}
                 </Link>
               ))}
-              <a
-                href={githubUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 theme-high-contrast:text-white transition-colors"
-              >
-                GitHub
-              </a>
             </div>
           </div>
           <div className="hidden md:flex items-center">
@@ -65,6 +56,7 @@ export function NavBar() {
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="inline-flex items-center justify-center p-2 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-zinc-500"
               aria-expanded={isMenuOpen}
+              aria-controls="mobile-menu"
             >
               <span className="sr-only">Open main menu</span>
               {isMenuOpen ? (
@@ -107,7 +99,7 @@ export function NavBar() {
 
       {/* Mobile menu */}
       {isMenuOpen && (
-        <div className="md:hidden bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 theme-high-contrast:bg-black theme-high-contrast:border-white">
+        <div id="mobile-menu" className="md:hidden bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 theme-high-contrast:bg-black theme-high-contrast:border-white">
           <div className="pt-2 pb-3 space-y-1 px-4">
             {navLinks.map((link) => (
               <Link
@@ -123,14 +115,6 @@ export function NavBar() {
                 {link.name}
               </Link>
             ))}
-            <a
-              href={githubUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block pl-3 pr-4 py-2 border-l-4 border-transparent text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 theme-high-contrast:text-white text-base font-medium transition-colors"
-            >
-              GitHub
-            </a>
           </div>
         </div>
       )}

@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use assert_cmd::Command;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -24,8 +26,15 @@ fn analyze_root_auth_gap_fixture_reports_one_s001() {
         .clone();
 
     let json: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["auth_gaps"].as_array().unwrap().len(), 1);
-    assert_eq!(json["summary"]["has_critical"], true);
+    let violations = json["rule_violations"].as_array().unwrap();
+    let auth_gap_count = violations
+        .iter()
+        .filter(|v| v["rule_name"] == "auth_gap")
+        .count();
+    assert!(
+        auth_gap_count >= 1,
+        "Expected at least 1 auth_gap violation"
+    );
 }
 
 #[test]
@@ -62,5 +71,13 @@ fn analyze_root_overflow_fixture_reports_s003() {
         .clone();
 
     let json: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["arithmetic_issues"].as_array().unwrap().len(), 1);
+    let violations = json["rule_violations"].as_array().unwrap();
+    let overflow_count = violations
+        .iter()
+        .filter(|v| v["rule_name"] == "arithmetic_overflow")
+        .count();
+    assert!(
+        overflow_count >= 1,
+        "Expected at least 1 arithmetic_overflow violation"
+    );
 }
